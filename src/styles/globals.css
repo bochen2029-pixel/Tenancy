@@ -1,0 +1,237 @@
+@import './fonts.css';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-base:        #1a1714;
+  --bg-surface:     #211c18;
+  --bg-elevated:    #2a2520;
+
+  --text-primary:   #e8dfd0;
+  --text-secondary: #a8a094;
+  --text-tertiary:  #6e6961;
+  --text-fade:      #4a4742;
+
+  --rule-journal:   #5a5048;
+  --border-subtle:  rgba(232, 223, 208, 0.06);
+  --border-medium:  rgba(232, 223, 208, 0.12);
+
+  --accent:         #c9a876;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+  font-family: 'EB Garamond', 'Sitka Text', 'Charter', 'Constantia', Georgia, serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+}
+
+::selection {
+  background: rgba(201, 168, 118, 0.25);
+  color: var(--text-primary);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-medium);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-subtle);
+}
+
+.dave-body {
+  font-family: 'EB Garamond', 'Sitka Text', 'Charter', 'Constantia', Georgia, serif;
+  font-size: 18px;
+  line-height: 1.65;
+  font-weight: 400;
+  color: var(--text-primary);
+  letter-spacing: 0.005em;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.dave-body p {
+  margin: 0 0 1.4em 0;
+}
+.dave-body p:last-child {
+  margin-bottom: 0;
+}
+
+/* Distinct visual gap between two consecutive Dave messages so an outreach
+   that follows a regular reply doesn't look glued to it. Larger than the
+   intra-message paragraph break. */
+.dave-body + .dave-body {
+  margin-top: 2.4em;
+}
+
+.user-line {
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-tertiary);
+  text-align: right;
+  margin: 1.6em 0 1.6em 50%;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.journal-block {
+  margin: 2.5em 0;
+  padding-left: 1.5em;
+  border-left: 1px solid var(--rule-journal);
+}
+.journal-label {
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  color: var(--text-tertiary);
+  margin-bottom: 0.8em;
+}
+.journal-body {
+  font-family: 'EB Garamond', 'Sitka Text', 'Charter', 'Constantia', Georgia, serif;
+  font-size: 16px;
+  line-height: 1.65;
+  font-style: italic;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+}
+
+.departure-line {
+  font-family: 'EB Garamond', 'Sitka Text', 'Charter', 'Constantia', Georgia, serif;
+  font-size: 17px;
+  font-style: italic;
+  color: var(--text-secondary);
+  opacity: 0.75;
+  margin: 0 0 3em 0;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.composer-input {
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  outline: none;
+  width: 100%;
+  resize: none;
+  padding: 0;
+}
+.composer-input::placeholder {
+  font-family: 'EB Garamond', 'Sitka Text', 'Charter', 'Constantia', Georgia, serif;
+  font-style: italic;
+  color: var(--text-tertiary);
+  opacity: 1;
+}
+
+.status-bar {
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.presence-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  opacity: 0.5;
+  transition: opacity 0.6s ease;
+}
+.presence-dot.streaming {
+  animation: presence-pulse 1.4s ease-in-out infinite;
+}
+.presence-dot.waiting {
+  animation: presence-slow 4.2s ease-in-out infinite;
+}
+
+@keyframes presence-pulse {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 1.0; }
+}
+@keyframes presence-slow {
+  0%, 100% { opacity: 0.18; }
+  50%      { opacity: 0.55; }
+}
+
+.message-fade {
+  transition: opacity 1.2s ease;
+}
+
+.gear-button {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity 0.2s ease;
+}
+.gear-button:hover {
+  opacity: 1;
+}
+
+.settings-button {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-medium);
+  border-radius: 3px;
+  padding: 8px 12px;
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.settings-button:hover:not(:disabled) {
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+}
+.settings-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 2px;
+  background: var(--border-medium);
+  outline: none;
+  border-radius: 1px;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: none;
+}
