@@ -15,6 +15,7 @@ mod sidecar;
 mod think_strip;
 mod time_awareness;
 
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 use tokio::process::Child;
@@ -28,6 +29,13 @@ pub struct AppState {
     pub idle_shutdown: Mutex<Option<oneshot::Sender<()>>>,
     pub outreach_shutdown: Mutex<Option<oneshot::Sender<()>>>,
     pub consolidation_shutdown: Mutex<Option<oneshot::Sender<()>>>,
+    /// True while the chat path (send_to_dave) is actively streaming a reply
+    /// to the frontend. Outreach checks this flag both before starting its
+    /// (multi-sample) inference and again before emission, to prevent
+    /// concurrent streams from racing on the frontend's pacedRenderer.
+    /// Without this, an outreach fire that completes while the chat path is
+    /// mid-stream produces interleaved garbage in the conversation pane.
+    pub chat_in_flight: Arc<AtomicBool>,
 }
 
 fn main() {
@@ -99,8 +107,15 @@ async fn init(app: AppHandle) -> anyhow::Result<()> {
 
     let client = Arc::new(llama_client::LlamaClient::new("http://127.0.0.1:8080"));
 
+    let chat_in_flight = Arc::new(AtomicBool::new(false));
+
     let idle_tx = idle_worker::spawn(app.clone(), db.clone(), client.clone());
-    let outreach_tx = outreach::spawn(app.clone(), db.clone(), client.clone());
+    let outreach_tx = outreach::spawn(
+        app.clone(),
+        db.clone(),
+        client.clone(),
+        chat_in_flight.clone(),
+    );
     let consolidation_tx = consolidation::spawn(app.clone(), db.clone(), client.clone());
 
     app.manage(AppState {
@@ -110,6 +125,7 @@ async fn init(app: AppHandle) -> anyhow::Result<()> {
         idle_shutdown: Mutex::new(Some(idle_tx)),
         outreach_shutdown: Mutex::new(Some(outreach_tx)),
         consolidation_shutdown: Mutex::new(Some(consolidation_tx)),
+        chat_in_flight,
     });
 
     let _ = app.emit("dave:ready", ());

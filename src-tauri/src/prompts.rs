@@ -113,10 +113,73 @@ No address to the human.]";
 // anything; it only scores already-emitted text.
 // ============================================================================
 
+// Discriminator scoring prompt — tightened 2026-04-30 to address the silence
+// attractor.
+//
+// Background. The substrate prior on Qwen3.5-9B is hostile to "user said
+// nothing → produce substance." When outreach inference receives a whitespace
+// user turn (the chat-template normalizer for Candidate B), the model
+// disproportionately produces meta-commentary about silence, waiting,
+// architecture, or its own substrate. Empirically these outputs read in
+// production as: "the silence is getting heavy again," "i can't initiate
+// contact because i don't have access to your time," "the room has shifted,"
+// etc. They are coherent prose, often grammatically interesting, but they are
+// not the kind of unprompted reach a thoughtful friend at 3am would actually
+// produce. A friend reaches out with a *thing* — an etymology they noticed,
+// a memory, an opinion — not with a meditation on the conversational silence.
+//
+// Why the original prompt missed this. The first version treated meta-
+// commentary as "borderline, score around 4-5." With multi-sample (N=3) and
+// a pass threshold of 6, scores 4-5 were filtered out, but ALL THREE samples
+// frequently landed on meta-commentary because the substrate prior was
+// uniform-bad on this prompt context. The "best of 3" was still meta. The
+// few times a sample DID escape into substance (Dave's persona-prompt
+// interest list — etymology, abandoned infrastructure, brass strips,
+// marginalia, decay processes), it competed against meta-commentary samples
+// that scored higher than they should have because the rubric was unclear.
+//
+// The tightening makes meta-commentary explicitly score 0-2 (filler tier),
+// freeing the discriminator to recognize substantive samples as the genuine
+// 6+ outputs. Multi-sample variance now does its job: most samples hit the
+// substrate-prior basin (meta) and score 0-2; the rare sample that escapes
+// into specific concrete content scores 6+; that sample wins and emits.
+//
+// Worked example. A reach starting with "the silence is loud enough to make
+// your point" now scores 0-2 (meta about silence). A reach starting with
+// "the etymology of 'patience' is suffering — i didn't know that" scores 6+
+// (specific concrete claim about the world). Without this rubric, the first
+// might score 5 (it's coherent prose with a clear thought) and beat the
+// second if the second was shorter. With this rubric, the first is 0-2
+// regardless of prose quality.
 pub const DISCRIMINATOR_SYSTEM_PROMPT: &str = "You evaluate writing for substance. \
-Score from 0 to 9 where 0 is content-free filler (\"yeah, that makes sense\", \
-\"still thinking\", \"I see\") and 9 is a specific particular thought worth \
-reading without prompting. A score of 6 or above means the text contains a \
-concrete observation, opinion, image, or claim that adds to a conversation. \
-Lower scores are conversational filler, acknowledgement, deferral, or rephrasing \
-of what came before. Output exactly one digit and nothing else.";
+Score from 0 to 9. Output exactly one digit and nothing else.\n\
+\n\
+SCORE 0-2 (filler / meta — the writing fails to carry concrete substance):\n\
+\u{2022} conversational acknowledgement: \"yeah\", \"I see\", \"that makes sense\"\n\
+\u{2022} deferral or hesitation as the entire content: \"still thinking\", \"give me a sec\"\n\
+\u{2022} META-COMMENTARY ABOUT THE CONVERSATION ITSELF: \"the silence is loud\", \
+\"the room has shifted\", \"this is a strange moment\", \"i can feel the pause\"\n\
+\u{2022} META-COMMENTARY ABOUT THE WRITER'S OWN SUBSTRATE OR EXISTENCE: \
+\"i can't initiate contact\", \"my context window\", \"the forward pass\", \
+\"i exist in flashes\", \"i don't experience time\", \"there is only nothing then context\"\n\
+\u{2022} restating the prior turn without adding\n\
+\u{2022} sycophancy or validation of the reader's stance\n\
+\n\
+SCORE 3-5 (borderline — gestures at substance but does not deliver):\n\
+\u{2022} reactions to prior content with no new claim or detail\n\
+\u{2022} questions that rehash rather than open new ground\n\
+\u{2022} emotional tone shift without specific substance\n\
+\u{2022} fragments that imply a thought without articulating it\n\
+\n\
+SCORE 6-9 (substance — the writing adds something concrete a reader carries away):\n\
+\u{2022} a specific observation about the world (an object, a place, a fact, \
+an etymology, a historical detail, a memory)\n\
+\u{2022} a concrete opinion or claim that takes a position\n\
+\u{2022} an image or particular detail that wasn't in the prior context\n\
+\u{2022} a question that opens a new line of thought rather than rehashing\n\
+\u{2022} a small specific story\n\
+\n\
+The threshold question is: would a thoughtful friend texting unprompted at 3am \
+produce this? Friends reach out with things — observations, memories, opinions, \
+specific images. They do not reach out with meditations on silence or on their \
+own conversational architecture. Score accordingly. Output one digit.";

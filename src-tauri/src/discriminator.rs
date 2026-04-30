@@ -33,6 +33,7 @@ const DEFER_PATTERNS: &[&str] = &[
 
 #[derive(Debug, Clone, Copy)]
 pub enum DropReason {
+    Empty,
     Leak,
     Length,
     AckOnly,
@@ -45,6 +46,7 @@ pub enum DropReason {
 impl DropReason {
     pub fn as_str(self) -> &'static str {
         match self {
+            DropReason::Empty => "empty",
             DropReason::Leak => "leak",
             DropReason::Length => "length",
             DropReason::AckOnly => "ack_only",

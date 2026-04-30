@@ -1,4 +1,6 @@
 use serde_json::json;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 
 use chrono::Local;
@@ -10,6 +12,27 @@ use crate::persistence::{self, ConsolidationEpoch, JournalEntry, MemoryEdit, Mes
 use crate::prompts;
 use crate::time_awareness;
 use crate::AppState;
+
+/// RAII guard that marks `chat_in_flight = true` for the duration of a chat
+/// stream and clears it on drop. Use via `let _g = ChatInFlightGuard::new(...);`
+/// at the top of any code path that emits to the frontend. Outreach checks
+/// this flag to avoid stomping on the chat path's stream.
+struct ChatInFlightGuard {
+    flag: Arc<AtomicBool>,
+}
+
+impl ChatInFlightGuard {
+    fn new(flag: Arc<AtomicBool>) -> Self {
+        flag.store(true, Ordering::SeqCst);
+        Self { flag }
+    }
+}
+
+impl Drop for ChatInFlightGuard {
+    fn drop(&mut self) {
+        self.flag.store(false, Ordering::SeqCst);
+    }
+}
 
 const VIEW_LOAD_LIMIT: i64 = 200;
 
@@ -23,6 +46,11 @@ pub async fn send_to_dave(
     persistence::touch_user_input(&state.db)
         .await
         .map_err(|e| e.to_string())?;
+
+    // Hold the chat-in-flight flag for the entire send. Outreach loop
+    // checks this both before its inference and before its emission, so
+    // it won't race with us. Released automatically on drop (any return path).
+    let _chat_guard = ChatInFlightGuard::new(state.chat_in_flight.clone());
 
     // Assemble context with memory partition: anchor + active epochs +
     // un-consolidated middle + recent. Replaces the old flat HISTORY_BUFFER_SIZE

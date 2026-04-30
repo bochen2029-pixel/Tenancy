@@ -965,17 +965,6 @@ pub async fn get_canvas(db: &DbHandle, conversation_id: i64) -> Result<String> {
     .await?
 }
 
-pub fn get_canvas_blocking(db: &DbHandle, conversation_id: i64) -> Result<String> {
-    let conn = db.lock().unwrap();
-    let val: Option<String> = conn
-        .query_row(
-            "SELECT content FROM memory_canvas WHERE conversation_id = ?1",
-            params![conversation_id],
-            |r| r.get(0),
-        )
-        .optional()?;
-    Ok(val.unwrap_or_default())
-}
 
 /// Upsert the canvas content. Returns the prior content (empty string if no
 /// row existed) so the caller can record an audit row.

@@ -28,7 +28,6 @@ pub const CONSOLIDATION_BATCH: usize = 30;
 // Token budget targets (approximate, char-based estimation: 4 chars ≈ 1 token).
 pub const TOKEN_BUDGET_TOTAL: usize = 64_000;
 pub const TOKEN_RESERVE: usize = 6_000;
-pub const TOKEN_TARGET_USABLE: usize = TOKEN_BUDGET_TOTAL - TOKEN_RESERVE;
 
 /// Char-based token estimate. Cheap, deterministic, no tokenizer dep.
 /// English averages ~4 chars/token; we round up for safety.
@@ -75,9 +74,12 @@ impl Partition {
     pub fn total_tokens(&self) -> usize {
         self.anchor_tokens() + self.canvas_tokens() + self.middle_tokens() + self.recent_tokens()
     }
+    // Test-only helpers. Production code computes these inline where needed.
+    #[cfg(test)]
     pub fn epoch_count(&self) -> usize {
         self.middle.iter().filter(|b| matches!(b, MiddleBlock::Epoch(_))).count()
     }
+    #[cfg(test)]
     pub fn middle_message_count(&self) -> usize {
         self.middle.iter().filter_map(|b| match b {
             MiddleBlock::Messages(ms) => Some(ms.len()),
@@ -221,11 +223,6 @@ pub fn build_chat_messages(
     out
 }
 
-/// Whether the recent zone is large enough to warrant firing the consolidator.
-pub fn should_consolidate(partition: &Partition) -> bool {
-    partition.recent.len() >= RECENT_MESSAGE_TRIGGER
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -306,24 +303,6 @@ mod tests {
         let chat = build_chat_messages("SYS", &p, Some("hi"));
         // 1 sys + 10 anchor + 0 canvas + 1 user = 12
         assert_eq!(chat.len(), 12);
-    }
-
-    #[test]
-    fn should_consolidate_threshold() {
-        let msgs: Vec<Message> = (1..=160).map(|i| msg(i, "user", "x")).collect();
-        let p = partition(&msgs, &[], "");
-        // 160 total, 30 anchor, 100 recent → recent.len() == 100, below trigger
-        assert!(!should_consolidate(&p));
-
-        let msgs: Vec<Message> = (1..=200).map(|i| msg(i, "user", "x")).collect();
-        let p = partition(&msgs, &[], "");
-        // 200 total, 30 anchor, recent gets last 100 → recent.len() == 100, below trigger
-        // Trigger fires only when recent reaches RECENT_MESSAGE_TRIGGER (130). The
-        // recent slot is bounded by RECENT_MESSAGE_TARGET (100), so should_consolidate
-        // never fires off the partition view alone; the consolidator instead checks
-        // raw message count vs. anchor + active epoch coverage. Test the direct
-        // semantics here: when recent zone IS at trigger size, return true.
-        assert!(!should_consolidate(&p));
     }
 
     #[test]
