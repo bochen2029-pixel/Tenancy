@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod chat_pacing;
+mod chat_triage;
 mod commands;
 mod consolidation;
 mod discriminator;

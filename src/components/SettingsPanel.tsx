@@ -8,7 +8,7 @@ import { ipc, SETTING_KEY_OUTREACH_THRESHOLD } from '../lib/tauri';
 
 const MIN_MIN = 1;
 const MAX_MIN = 15;
-const DEFAULT_MIN = 5;
+const DEFAULT_MIN = 3; // Locked in 2026-05-01 from Bo's tuned setting.
 
 export function SettingsPanel() {
   const open = useDaveStore((s) => s.settingsPanelOpen);
@@ -29,6 +29,25 @@ export function SettingsPanel() {
   const [busy, setBusy] = useState<null | 'inject' | 'clear' | 'export'>(null);
   const [lastResult, setLastResult] = useState<string | null>(null);
 
+  // Chat-triage testing override. Empty = normal weighted-sampling. Set to
+  // 'delay' / 'refuse' / 'respond' to force that decision on every send.
+  // Useful for verifying the deferred-fire path without rolling probabilistic
+  // dice in normal triage.
+  const [triageForce, setTriageForce] = useState<string>('');
+  const [savingTriage, setSavingTriage] = useState(false);
+
+  // Pace factor — global timing multiplier. 0.2 = snappy, 1.0 = baseline,
+  // 2.0 = deliberate. Backend reads this from settings on every send and
+  // scales every timing variable proportionally (read delay + compose hold
+  // + per-char + punctuation pauses). One knob for the whole system.
+  // Default locked in 2026-05-01 from Bo's tuned setting. Mirrors
+  // chat_pacing.rs PACE_DEFAULT (0.65).
+  const PACE_MIN_F = 0.2;
+  const PACE_MAX_F = 2.0;
+  const PACE_DEFAULT_F = 0.65;
+  const [pace, setPace] = useState<number>(PACE_DEFAULT_F);
+  const [savingPace, setSavingPace] = useState(false);
+
   useEffect(() => {
     if (!open) return;
     setLastResult(null);
@@ -45,7 +64,46 @@ export function SettingsPanel() {
         }
       })
       .catch(() => {});
+    ipc
+      .getSetting('chat_triage_force')
+      .then((raw) => setTriageForce(raw || ''))
+      .catch(() => {});
+    ipc
+      .getSetting('chat_pacing_pace')
+      .then((raw) => {
+        if (raw) {
+          const v = parseFloat(raw);
+          if (!Number.isNaN(v)) {
+            setPace(Math.max(PACE_MIN_F, Math.min(PACE_MAX_F, v)));
+          }
+        }
+      })
+      .catch(() => {});
   }, [open]);
+
+  async function handleTriageForceChange(v: string) {
+    setTriageForce(v);
+    setSavingTriage(true);
+    try {
+      await ipc.setSetting('chat_triage_force', v);
+    } catch (e) {
+      console.error('save triage force failed:', e);
+    } finally {
+      setSavingTriage(false);
+    }
+  }
+
+  async function handlePaceChange(v: number) {
+    setPace(v);
+    setSavingPace(true);
+    try {
+      await ipc.setSetting('chat_pacing_pace', v.toFixed(2));
+    } catch (e) {
+      console.error('save pace failed:', e);
+    } finally {
+      setSavingPace(false);
+    }
+  }
 
   if (!open) return null;
 
@@ -158,6 +216,74 @@ export function SettingsPanel() {
               {thresholdMin} min
             </span>
           </div>
+        </div>
+
+        {/* Pace — global timing multiplier */}
+        <div className="mb-10">
+          <div
+            className="status-bar mb-2"
+            style={{ color: 'var(--text-secondary)', textTransform: 'none' }}
+          >
+            pace
+          </div>
+          <div
+            className="status-bar mb-3"
+            style={{ opacity: 0.5, fontSize: 11, textTransform: 'none' }}
+          >
+            global timing multiplier. scales every delay proportionally:
+            read time, compose hold, per-char streaming, punctuation pauses.
+            0.2x = snappy. 1.0x = baseline. 2.0x = deliberate. one knob for
+            the whole feel. takes effect on next send (no restart needed).
+          </div>
+          <div className="flex items-center gap-4">
+            <input
+              type="range"
+              min={PACE_MIN_F}
+              max={PACE_MAX_F}
+              step={0.05}
+              value={pace}
+              onChange={(e) => handlePaceChange(parseFloat(e.target.value))}
+              style={{ flex: 1 }}
+              disabled={savingPace}
+            />
+            <span
+              className="status-bar"
+              style={{ color: 'var(--text-primary)', minWidth: 70, textAlign: 'right' }}
+            >
+              {pace.toFixed(2)}x
+            </span>
+          </div>
+        </div>
+
+        {/* Chat triage force-override (testing) */}
+        <div className="mb-10">
+          <div
+            className="status-bar mb-2"
+            style={{ color: 'var(--text-secondary)', textTransform: 'none' }}
+          >
+            chat triage override (testing)
+          </div>
+          <div
+            className="status-bar mb-3"
+            style={{ opacity: 0.5, fontSize: 11, textTransform: 'none' }}
+          >
+            force every send_to_dave to take this branch. blank = normal
+            weighted-sampling triage. delay = 5s deferred fire (chat pacing
+            applies on top). refuse = no response. respond = normal
+            immediate reply.
+          </div>
+          <select
+            value={triageForce}
+            onChange={(e) => handleTriageForceChange(e.target.value)}
+            disabled={savingTriage}
+            className="settings-button"
+            style={{ width: '100%' }}
+          >
+            <option value="">normal (weighted sampling)</option>
+            <option value="respond">force respond</option>
+            <option value="delay">force delay (5s)</option>
+            <option value="refuse">force refuse</option>
+          </select>
         </div>
 
         {/* Panels — open without remembering keyboard shortcuts */}

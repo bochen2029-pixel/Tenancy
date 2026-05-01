@@ -70,6 +70,27 @@ export async function setupStreamConsumer() {
       useDaveStore.getState().receiveInlineJournal(entry);
     }),
   );
+
+  // Two-checkmark indicators (Telegram-style). Backend emits user_persisted
+  // (with real DB id) immediately after persisting; the optimistic-id message
+  // in the store gets reconciled to the real id. Then message_delivered fires
+  // after the harness verifies llama-server connectivity. Then message_read
+  // fires after the read delay + triage decision completes.
+  unlistens.push(
+    await events.onUserPersisted((msg) => {
+      useDaveStore.getState().reconcileOptimisticUserId(msg.id, msg.content);
+    }),
+  );
+  unlistens.push(
+    await events.onMessageDelivered((messageId) => {
+      useDaveStore.getState().markMessageDelivered(messageId);
+    }),
+  );
+  unlistens.push(
+    await events.onMessageRead((messageId) => {
+      useDaveStore.getState().markMessageRead(messageId);
+    }),
+  );
 }
 
 export function teardownStreamConsumer() {

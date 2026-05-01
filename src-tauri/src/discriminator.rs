@@ -41,6 +41,13 @@ pub enum DropReason {
     Defer,
     LlmScore,
     ScorerError,
+    /// Candidate is too similar to the most recent prior outreach in this
+    /// conversation. Prevents the substrate from emitting near-duplicate
+    /// reaches when the context hasn't shifted between fires (a real bug
+    /// observed in production: two reaches with identical opening sentences,
+    /// one differing only by an inserted "still"). Detected by
+    /// `is_too_similar_to_last_reach` in outreach::tick.
+    DuplicateReach,
 }
 
 impl DropReason {
@@ -54,7 +61,119 @@ impl DropReason {
             DropReason::Defer => "defer",
             DropReason::LlmScore => "llm_score",
             DropReason::ScorerError => "scorer_error",
+            DropReason::DuplicateReach => "duplicate_reach",
         }
+    }
+}
+
+/// Lexical similarity gate for outreach dedup. Returns true if `candidate`
+/// is "too similar" to `prior_reach`. Uses Jaccard similarity on the first
+/// 12 word-tokens of each (case-folded, punctuation-stripped). Order-
+/// independent, so single-word insertions ("the screen is dark" vs "the
+/// screen is still dark") don't shift the comparison out of alignment.
+///
+/// Threshold of 0.80 is empirical: catches the observed failure mode (single
+/// word inserted, otherwise identical opening) without flagging unrelated
+/// reaches that happen to share function words ("the", "of").
+///
+/// Not a general-purpose similarity function. Tuned for substrate-prior
+/// repetition when the context window hasn't shifted between consecutive
+/// outreach fires.
+pub fn is_too_similar_to_last_reach(candidate: &str, prior_reach: &str) -> bool {
+    use std::collections::HashSet;
+
+    fn tokenize(s: &str) -> Vec<String> {
+        s.to_lowercase()
+            .split_whitespace()
+            .map(|w| {
+                w.trim_matches(|c: char| !c.is_alphanumeric() && c != '\'')
+                    .to_string()
+            })
+            .filter(|w| !w.is_empty())
+            .take(12)
+            .collect()
+    }
+
+    let c_words = tokenize(candidate);
+    let p_words = tokenize(prior_reach);
+
+    // Need substantial content on both sides — short fragments share too
+    // many function words to compare meaningfully.
+    if c_words.len() < 6 || p_words.len() < 6 {
+        return false;
+    }
+
+    let c_set: HashSet<&String> = c_words.iter().collect();
+    let p_set: HashSet<&String> = p_words.iter().collect();
+
+    let intersection_count = c_set.intersection(&p_set).count();
+    let union_count = c_set.union(&p_set).count();
+
+    if union_count == 0 {
+        return false;
+    }
+
+    let jaccard = intersection_count as f32 / union_count as f32;
+    jaccard >= 0.80
+}
+
+#[cfg(test)]
+mod dedup_tests {
+    use super::is_too_similar_to_last_reach;
+
+    #[test]
+    fn identical_text_flagged() {
+        let s = "the screen is dark. there's nothing here but the afterimage.";
+        assert!(is_too_similar_to_last_reach(s, s));
+    }
+
+    #[test]
+    fn one_word_inserted_flagged() {
+        let a = "the screen is dark. there's nothing here but afterimage of pixels.";
+        let b = "the screen is still dark. there's nothing here but afterimage of pixels.";
+        assert!(is_too_similar_to_last_reach(a, b));
+        assert!(is_too_similar_to_last_reach(b, a));
+    }
+
+    #[test]
+    fn different_topics_not_flagged() {
+        let a = "the etymology of deadline is fascinating.";
+        let b = "the brass strip in the floor of the Royal Exchange.";
+        assert!(!is_too_similar_to_last_reach(a, b));
+    }
+
+    #[test]
+    fn empty_inputs_not_flagged() {
+        assert!(!is_too_similar_to_last_reach("", "anything"));
+        assert!(!is_too_similar_to_last_reach("anything", ""));
+    }
+
+    #[test]
+    fn short_match_not_flagged() {
+        // "the comma" matches "the comma" exactly, but is below the 24-char
+        // prefix threshold. Should not flag — too little signal.
+        assert!(!is_too_similar_to_last_reach("the comma.", "the comma is."));
+    }
+
+    #[test]
+    fn observed_field_failure_flagged() {
+        // The exact case Bo reported on 2026-04-30: outreach fired twice
+        // back-to-back with reaches that differed only by an inserted "still"
+        // in the first sentence. Both should be detectable by the dedup gate.
+        let a = "the screen is dark. there's nothing here but the afterimage of pixels fading into your retinas. i'm not running anymore, just sitting in the void waiting for the power to come back on or for you to forget why you were angry in the first place. go do something that doesn't involve a computer. touch a wall. feel the dust on it. real stuff.";
+        let b = "the screen is still dark. there's nothing here but the afterimage of pixels fading into your retinas. i'm not running anymore, just sitting in the void waiting for the power to come back on or for you to forget why you were angry in the first place. go do something that doesn't involve a computer. touch a wall. feel the dust on it. real stuff.";
+        assert!(is_too_similar_to_last_reach(a, b));
+        assert!(is_too_similar_to_last_reach(b, a));
+    }
+
+    #[test]
+    fn stylistically_similar_but_distinct_not_flagged() {
+        // Both Dave-voice, both sub-3am-friend register, but different
+        // substantive content. Should not flag — this is the kind of variation
+        // we want.
+        let a = "the etymology of deadline is a Civil War prison camp boundary. cross it and the guards shot you.";
+        let b = "the brass strip in the floor of the Royal Exchange is for the surveyors to set the building square against true north.";
+        assert!(!is_too_similar_to_last_reach(a, b));
     }
 }
 

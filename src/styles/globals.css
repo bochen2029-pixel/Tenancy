@@ -174,6 +174,89 @@ html, body, #root {
   transition: opacity 1.2s ease;
 }
 
+/* Two-checkmark delivery/read indicator (Telegram-style). Inline with the
+   user's message text, slightly offset stacked. Three states:
+     pending   → both checks faint gray (message in flight, no llama conn)
+     delivered → first check blue, second check absent
+     read      → both checks blue, slightly offset
+
+   Real, not fake: backend gates the state transitions on actual llama-server
+   reachability (delivered) and actual triage completion (read). */
+.delivery-checks {
+  display: inline-block;
+  position: relative;
+  margin-left: 8px;
+  font-size: 11px;
+  vertical-align: middle;
+  width: 14px;
+  height: 11px;
+  line-height: 11px;
+}
+.delivery-checks .check {
+  position: absolute;
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-weight: 600;
+  transition: color 0.35s ease, opacity 0.35s ease;
+}
+.delivery-checks .check-1 {
+  left: 0;
+  top: 0;
+}
+.delivery-checks .check-2 {
+  left: 4px;
+  top: 0;
+}
+/* Pending: both checks gray, faint. */
+.delivery-checks.pending .check-1,
+.delivery-checks.pending .check-2 {
+  color: var(--text-fade);
+  opacity: 0.7;
+}
+/* Delivered: first check blue, second hidden. */
+.delivery-checks.delivered .check-1 {
+  color: #5b9bd5;
+  opacity: 1;
+}
+.delivery-checks.delivered .check-2 {
+  opacity: 0;
+}
+/* Read: both checks blue. */
+.delivery-checks.read .check-1,
+.delivery-checks.read .check-2 {
+  color: #5b9bd5;
+  opacity: 1;
+}
+
+/* Typing indicator — shown after natural pause completes, before tokens
+   arrive, so the user can tell Dave is actually about to speak. Three dots,
+   each fading in sequence. Lowercase italic register matches Dave's voice.
+   Disappears the moment the first token arrives (replaced by the streaming
+   Message). */
+.typing-indicator {
+  font-family: 'EB Garamond', 'Sitka Text', 'Charter', 'Constantia', Georgia, serif;
+  font-style: italic;
+  font-size: 18px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+  margin: 24px 0;
+  letter-spacing: 0.005em;
+}
+.typing-indicator .dot {
+  display: inline-block;
+  animation: typing-dot 1.4s ease-in-out infinite;
+  opacity: 0.3;
+}
+.typing-indicator .dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.typing-indicator .dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes typing-dot {
+  0%, 100% { opacity: 0.3; }
+  50%      { opacity: 1.0; }
+}
+
 .gear-button {
   background: transparent;
   border: none;

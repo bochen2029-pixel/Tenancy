@@ -47,6 +47,17 @@ pub struct OutreachDrop {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingChatResponse {
+    pub id: i64,
+    pub conversation_id: i64,
+    pub user_message_id: i64,
+    pub fire_at: i64,
+    pub fired: bool,
+    pub cancelled: bool,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConsolidationEpoch {
     pub id: i64,
     pub conversation_id: i64,
@@ -125,6 +136,33 @@ fn init_schema(conn: &Connection) -> Result<()> {
             updated_at INTEGER NOT NULL,
             FOREIGN KEY(conversation_id) REFERENCES conversations(id)
         );
+        CREATE TABLE IF NOT EXISTS chat_decisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id INTEGER NOT NULL,
+            user_message_id INTEGER NOT NULL,
+            decision TEXT NOT NULL CHECK (decision IN ('respond','delay','refuse','forced_respond')),
+            triage_reasons TEXT NOT NULL,
+            delay_weight REAL NOT NULL DEFAULT 0.0,
+            refuse_weight REAL NOT NULL DEFAULT 0.0,
+            delay_seconds INTEGER,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY(conversation_id) REFERENCES conversations(id),
+            FOREIGN KEY(user_message_id) REFERENCES messages(id)
+        );
+        CREATE TABLE IF NOT EXISTS pending_chat_responses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id INTEGER NOT NULL,
+            user_message_id INTEGER NOT NULL,
+            fire_at INTEGER NOT NULL,
+            fired INTEGER NOT NULL DEFAULT 0,
+            cancelled INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY(conversation_id) REFERENCES conversations(id),
+            FOREIGN KEY(user_message_id) REFERENCES messages(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_pending_chat_due
+            ON pending_chat_responses(fire_at)
+            WHERE fired = 0 AND cancelled = 0;
         CREATE TABLE IF NOT EXISTS consolidation_epochs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             conversation_id INTEGER NOT NULL,
@@ -538,6 +576,220 @@ pub async fn insert_outreach_drop(
     .await?
 }
 
+/// Record the chat-triage decision for a user message. One row per send_to_dave
+/// invocation regardless of branch — gives us the full distribution of
+/// respond/delay/refuse/forced_respond outcomes for forensic review.
+pub async fn insert_chat_decision(
+    db: &DbHandle,
+    conversation_id: i64,
+    user_message_id: i64,
+    decision: &str,
+    triage_reasons: &str,
+    delay_weight: f32,
+    refuse_weight: f32,
+    delay_seconds: Option<i64>,
+) -> Result<()> {
+    let db = db.clone();
+    let decision = decision.to_string();
+    let triage_reasons = triage_reasons.to_string();
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        let conn = db.lock().unwrap();
+        let now = Utc::now().timestamp();
+        conn.execute(
+            "INSERT INTO chat_decisions (conversation_id, user_message_id, decision, triage_reasons, delay_weight, refuse_weight, delay_seconds, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![conversation_id, user_message_id, decision, triage_reasons, delay_weight as f64, refuse_weight as f64, delay_seconds, now],
+        )?;
+        Ok(())
+    })
+    .await?
+}
+
+/// Schedule a deferred chat response. The outreach loop's tick checks the
+/// pending_chat_responses table on each fire and runs inference for any row
+/// whose fire_at has elapsed. Returns the new pending row id.
+pub async fn schedule_pending_response(
+    db: &DbHandle,
+    conversation_id: i64,
+    user_message_id: i64,
+    fire_at: i64,
+) -> Result<i64> {
+    let db = db.clone();
+    tokio::task::spawn_blocking(move || -> Result<i64> {
+        let conn = db.lock().unwrap();
+        let now = Utc::now().timestamp();
+        conn.execute(
+            "INSERT INTO pending_chat_responses (conversation_id, user_message_id, fire_at, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![conversation_id, user_message_id, fire_at, now],
+        )?;
+        Ok(conn.last_insert_rowid())
+    })
+    .await?
+}
+
+/// Return all pending responses whose fire_at is in the past and which have
+/// not been fired or cancelled. Caller is expected to mark each fired before
+/// emitting; a second tick that picks up the same row would cause double-fire.
+pub async fn due_pending_responses(db: &DbHandle) -> Result<Vec<PendingChatResponse>> {
+    let db = db.clone();
+    tokio::task::spawn_blocking(move || -> Result<Vec<PendingChatResponse>> {
+        let conn = db.lock().unwrap();
+        let now = Utc::now().timestamp();
+        let mut stmt = conn.prepare(
+            "SELECT id, conversation_id, user_message_id, fire_at, fired, cancelled, created_at
+             FROM pending_chat_responses
+             WHERE fired = 0 AND cancelled = 0 AND fire_at <= ?1
+             ORDER BY fire_at ASC",
+        )?;
+        let rows = stmt.query_map(params![now], |r| {
+            let fired_flag: i64 = r.get(4)?;
+            let cancelled_flag: i64 = r.get(5)?;
+            Ok(PendingChatResponse {
+                id: r.get(0)?,
+                conversation_id: r.get(1)?,
+                user_message_id: r.get(2)?,
+                fire_at: r.get(3)?,
+                fired: fired_flag != 0,
+                cancelled: cancelled_flag != 0,
+                created_at: r.get(6)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows { out.push(row?); }
+        Ok(out)
+    })
+    .await?
+}
+
+/// Atomic claim-and-mark-fired for a pending row. Returns Ok(true) only if
+/// the row exists, is not yet fired, and is not cancelled — and the call
+/// successfully updated it to fired=1. Returns Ok(false) if the row was
+/// already fired (someone else claimed it), cancelled (user sent a new
+/// message), or doesn't exist.
+///
+/// Used by both the precise spawned timer (in send_to_dave Delay branch)
+/// and the outreach-tick fallback. Whichever fires first wins; the other
+/// sees fired=1 and skips. Prevents double-emission.
+pub async fn claim_pending_fire(db: &DbHandle, id: i64) -> Result<bool> {
+    let db = db.clone();
+    tokio::task::spawn_blocking(move || -> Result<bool> {
+        let conn = db.lock().unwrap();
+        // Conditional UPDATE: only flip fired=1 if currently fired=0 AND
+        // cancelled=0. SQLite reports rows-affected, which tells us
+        // whether we won the race.
+        let n = conn.execute(
+            "UPDATE pending_chat_responses SET fired = 1
+             WHERE id = ?1 AND fired = 0 AND cancelled = 0",
+            params![id],
+        )?;
+        Ok(n > 0)
+    })
+    .await?
+}
+
+/// Load a pending row by id (for spawned timer to look up the user_message_id).
+pub async fn load_pending_by_id(db: &DbHandle, id: i64) -> Result<Option<PendingChatResponse>> {
+    let db = db.clone();
+    tokio::task::spawn_blocking(move || -> Result<Option<PendingChatResponse>> {
+        let conn = db.lock().unwrap();
+        let row = conn
+            .query_row(
+                "SELECT id, conversation_id, user_message_id, fire_at, fired, cancelled, created_at
+                 FROM pending_chat_responses WHERE id = ?1",
+                params![id],
+                |r| {
+                    let fired_flag: i64 = r.get(4)?;
+                    let cancelled_flag: i64 = r.get(5)?;
+                    Ok(PendingChatResponse {
+                        id: r.get(0)?,
+                        conversation_id: r.get(1)?,
+                        user_message_id: r.get(2)?,
+                        fire_at: r.get(3)?,
+                        fired: fired_flag != 0,
+                        cancelled: cancelled_flag != 0,
+                        created_at: r.get(6)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(row)
+    })
+    .await?
+}
+
+/// Cancel all unfired/un-cancelled pending responses for a conversation. Called
+/// at the top of send_to_dave: a new user message supersedes any prior pending
+/// fire for that conversation. The cancelled rows stay in the table for
+/// forensic review (we never delete; we only mark).
+pub async fn cancel_pending_for_conversation(db: &DbHandle, conversation_id: i64) -> Result<i64> {
+    let db = db.clone();
+    tokio::task::spawn_blocking(move || -> Result<i64> {
+        let conn = db.lock().unwrap();
+        let n = conn.execute(
+            "UPDATE pending_chat_responses SET cancelled = 1
+             WHERE conversation_id = ?1 AND fired = 0 AND cancelled = 0",
+            params![conversation_id],
+        )?;
+        Ok(n as i64)
+    })
+    .await?
+}
+
+/// Fetch the most recent Dave-initiated assistant message (outreach reach)
+/// in a conversation, if any. Used by the outreach tick's dedup gate to
+/// compare a fresh candidate against the most recent reach and drop it if
+/// they're too similar — prevents the substrate from emitting near-identical
+/// reaches back-to-back when the context hasn't changed between fires.
+pub async fn last_dave_initiated_message(
+    db: &DbHandle,
+    conversation_id: i64,
+) -> Result<Option<String>> {
+    let db = db.clone();
+    tokio::task::spawn_blocking(move || -> Result<Option<String>> {
+        let conn = db.lock().unwrap();
+        let row: Option<String> = conn
+            .query_row(
+                "SELECT content FROM messages
+                 WHERE conversation_id = ?1
+                   AND role = 'assistant'
+                   AND initiated_by_dave = 1
+                 ORDER BY id DESC LIMIT 1",
+                params![conversation_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(row)
+    })
+    .await?
+}
+
+/// Load a single message by id. Used by the deferred fire path in outreach to
+/// fetch the user_text that triggered the pending response.
+pub async fn load_message_by_id(db: &DbHandle, message_id: i64) -> Result<Option<Message>> {
+    let db = db.clone();
+    tokio::task::spawn_blocking(move || -> Result<Option<Message>> {
+        let conn = db.lock().unwrap();
+        let row = conn
+            .query_row(
+                "SELECT id, conversation_id, role, content, created_at FROM messages WHERE id = ?1",
+                params![message_id],
+                |r| {
+                    Ok(Message {
+                        id: r.get(0)?,
+                        conversation_id: r.get(1)?,
+                        role: r.get(2)?,
+                        content: r.get(3)?,
+                        created_at: r.get(4)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(row)
+    })
+    .await?
+}
+
 pub async fn get_setting(db: &DbHandle, key: &str) -> Result<Option<String>> {
     let db = db.clone();
     let key = key.to_string();
@@ -594,6 +846,8 @@ pub async fn clear_all_data(db: &DbHandle) -> Result<()> {
         conn.execute("DELETE FROM memory_edits", [])?;
         conn.execute("DELETE FROM consolidation_epochs", [])?;
         conn.execute("DELETE FROM memory_canvas", [])?;
+        conn.execute("DELETE FROM pending_chat_responses", [])?;
+        conn.execute("DELETE FROM chat_decisions", [])?;
         conn.execute("DELETE FROM messages", [])?;
         conn.execute("DELETE FROM journal", [])?;
         conn.execute("DELETE FROM outreach_drops", [])?;

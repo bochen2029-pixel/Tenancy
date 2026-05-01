@@ -1,6 +1,16 @@
-// Variable-delay scheduler. The model emits tokens at ~80 tok/s, which renders
-// as a firehose. This wraps the stream with per-character delays at punctuation
-// boundaries, simulating cadence. Constants are here, not in a settings UI.
+// Pass-through renderer. Backend (chat_pacing.rs) owns ALL visual pacing
+// now — it computes cadence-aware per-char delays based on response length
+// and conversation tempo, then emits dave:token events at the calculated
+// pace. This module's job is just to:
+//
+//   1. Receive chars as they arrive from backend (one per dave:token event)
+//   2. Append them to pendingAssistant via onChar
+//   3. Call onComplete when input is closed and all chars rendered
+//
+// No client-side delays. The backend's inter-emit sleeps create the visible
+// cadence. This is the single-source-of-truth model: backend has the cadence
+// score, the response length, and the typing-speed math; frontend just
+// displays.
 
 export type PacedRendererOptions = {
   onChar: (char: string) => void;
@@ -13,28 +23,6 @@ export type PacedRenderer = {
   isActive(): boolean;
 };
 
-const PARAGRAPH_PAUSE_MIN = 600;
-const PARAGRAPH_PAUSE_VAR = 600;
-const SENTENCE_PAUSE_MIN = 200;
-const SENTENCE_PAUSE_VAR = 200;
-const CLAUSE_PAUSE_MIN = 80;
-const CLAUSE_PAUSE_VAR = 70;
-const CHAR_DELAY_MIN = 12;
-const CHAR_DELAY_VAR = 18;
-
-function delayFor(char: string, prevChar: string | undefined): number {
-  if (char === '\n' && prevChar === '\n') {
-    return PARAGRAPH_PAUSE_MIN + Math.random() * PARAGRAPH_PAUSE_VAR;
-  }
-  if (prevChar === '.' || prevChar === '!' || prevChar === '?') {
-    return SENTENCE_PAUSE_MIN + Math.random() * SENTENCE_PAUSE_VAR;
-  }
-  if (prevChar === ',' || prevChar === ';' || prevChar === ':') {
-    return CLAUSE_PAUSE_MIN + Math.random() * CLAUSE_PAUSE_VAR;
-  }
-  return CHAR_DELAY_MIN + Math.random() * CHAR_DELAY_VAR;
-}
-
 export function createPacedRenderer({ onChar, onComplete }: PacedRendererOptions): PacedRenderer {
   const queue: string[] = [];
   let streaming = false;
@@ -42,17 +30,18 @@ export function createPacedRenderer({ onChar, onComplete }: PacedRendererOptions
 
   async function loop() {
     streaming = true;
-    let prevChar: string | undefined;
     while (queue.length > 0 || !inputClosed) {
       if (queue.length === 0) {
-        await new Promise((r) => setTimeout(r, 30));
+        // Idle wait for either new chars or closeInput. Short interval so
+        // we react quickly when backend emits — backend's per-char sleep
+        // is the actual pacing source, this just keeps the loop alive.
+        await new Promise((r) => setTimeout(r, 16));
         continue;
       }
       const char = queue.shift()!;
       onChar(char);
-      const delay = delayFor(char, prevChar);
-      prevChar = char;
-      await new Promise((r) => setTimeout(r, delay));
+      // No per-char delay here. Backend controls timing via inter-emit
+      // sleeps; chars arrive at the right moments and we just render.
     }
     streaming = false;
     onComplete();

@@ -5,7 +5,6 @@ export function Composer() {
   const [text, setText] = useState('');
   const ref = useRef<HTMLTextAreaElement>(null);
   const send = useDaveStore((s) => s.send);
-  const isStreaming = useDaveStore((s) => s.isStreaming);
 
   useEffect(() => {
     const ta = ref.current;
@@ -18,7 +17,9 @@ export function Composer() {
   function handleKey(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (!isStreaming && text.trim()) {
+      // Composer is always available — no isStreaming gate. Dave can
+      // refuse, delay, or be mid-stream; the user can always type.
+      if (text.trim()) {
         const out = text;
         setText('');
         send(out);

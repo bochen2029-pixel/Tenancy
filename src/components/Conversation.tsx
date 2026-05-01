@@ -3,6 +3,7 @@ import { useDaveStore } from '../state/store';
 import { Message } from './Message';
 import { JournalEntry } from './JournalEntry';
 import { DepartureLine } from './DepartureLine';
+import { TypingIndicator } from './TypingIndicator';
 import { opacityForMessage } from '../lib/memory';
 
 export function Conversation() {
@@ -13,6 +14,7 @@ export function Conversation() {
   const departure = useDaveStore((s) => s.departure);
   const startupEntry = useDaveStore((s) => s.startupEntry);
   const bufferSize = useDaveStore((s) => s.bufferSize);
+  const deliveryByMessageId = useDaveStore((s) => s.deliveryByMessageId);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
@@ -57,21 +59,31 @@ export function Conversation() {
             opacity={1.0}
           />
         )}
-        {messages.map((m, i) => (
-          <Message
-            key={m.id}
-            role={m.role}
-            content={m.content}
-            opacity={opacityForMessage(i, totalLen, bufferSize)}
-          />
-        ))}
+        {messages.map((m, i) => {
+          const delivery = m.role === 'user' ? deliveryByMessageId[m.id] : undefined;
+          return (
+            <Message
+              key={m.id}
+              role={m.role}
+              content={m.content}
+              opacity={opacityForMessage(i, totalLen, bufferSize)}
+              delivered={delivery?.delivered}
+              read={delivery?.read}
+            />
+          );
+        })}
         {inlineJournals.map((j) => (
           <JournalEntry key={j.id} content={j.content} />
         ))}
-        {isStreaming && (
+        {/* Typing indicator: shown when isStreaming is true but no tokens have
+            arrived yet. Replaced by the streaming Message the moment first
+            token lands. Per the design directive: typing indicator only when
+            Dave will actually type. */}
+        {isStreaming && pendingAssistant.length === 0 && <TypingIndicator />}
+        {isStreaming && pendingAssistant.length > 0 && (
           <Message
             role="assistant"
-            content={pendingAssistant || '\u00A0'}
+            content={pendingAssistant}
             opacity={1.0}
             streaming
           />

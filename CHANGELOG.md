@@ -9,6 +9,200 @@ To roll back a change: `cp -r .snapshots/<timestamp>_<label>/* ./` then
 
 ---
 
+## 2026-04-30 — Cadence-aware dynamic chat pacing (replaces response_pacing.rs)
+
+**Snapshot:** `.snapshots/2026-04-30_pre-cadence-pacing/`
+
+**Problem.** Bo flagged that Dave's response timing felt wrong on multiple
+axes: (a) "hi" was getting a 6-second pause where it should have been near-
+instant; (b) streaming chars at a fixed rate of 5 chars/sec felt robotic and
+slow; (c) the typing indicator only briefly preceded text — should be a
+genuine "Dave is composing in his head" beat that scales with response
+length; (d) no awareness of conversational tempo (rapid chitchat vs.
+substantive exchange should pace differently).
+
+**The new model.** Dave's response after the second-checkmark decomposes:
+
+```
+T_total = T_compose + T_streaming = response_chars / typing_speed
+        ↑                          ↑
+     dots only,              chars appearing
+     "composing"             one by one,
+                             "typing"
+```
+
+Three knobs:
+
+1. **Cadence score** (0.0=slow, 1.0=rapid) computed from avg gap between
+   last 4-6 messages. ≤30s avg → 1.0 (rapid). ≥120s avg → 0.0 (slow).
+   Default 0.5 when history insufficient.
+
+2. **Typing speed** (chars/sec). Linear blend by cadence: SLOW=8 chars/sec
+   (~50 wpm thoughtful) → FAST=25 chars/sec (~150 wpm rapid).
+
+3. **Compose ratio** (T_compose / T_total). For short responses, ratio=0.5
+   (indicator visible roughly equal to streaming time). For long responses,
+   ratio asymptotes to 0.10 so we don't watch dots forever.
+   - N ≤ 150 chars: ratio = 0.50
+   - N > 150: ratio = 0.10 + 0.40 × (150 / N)
+   - Asymptote: ratio(∞) = 0.10
+
+**Per-char timing within stream.** Each char's actual delay is sampled with
+±50% variance around the average (`char_base × (0.5 + random())`), giving
+the texture-of-real-typing feel. Punctuation pauses scale: clause +2×,
+sentence +5×, paragraph +10×.
+
+**Read delay also cadence-aware.** Was 800-3500ms based on user message
+length only. Now blends with cadence: rapid chitchat → near-floor (300ms);
+slow exchange → full read time. Floor 300ms, cap 3500ms.
+
+**Worked examples (verifying spec):**
+
+| User msg | Response | Cadence | T_total | T_compose | T_stream | Total post-read |
+|---|---|---|---|---|---|---|
+| "hi" | "yeah" (4) | rapid (1.0) | 0.16s | 0.08s | 0.08s | **0.16s** |
+| chitchat Q | 100 chars | mid (0.5) | 6s | 3s | 3s | 6s |
+| substantive Q | 300 chars | slow (0.0) | 37.5s | 11s | 26s | 37.5s |
+| essay req | 1500 chars | slow (0.0) | 188s | 26s | 162s | 188s |
+
+For "hi" with rapid cadence: ~300ms read + 0.16s response = ~0.5s end-to-end.
+Bo's spec was "near-instant or 1s at most." ✓
+
+For 1500 chars with slow cadence: ratio=0.14 means user only watches dots for
+~14% of total (26s) before chars start. Most of the time is watching the
+actual streaming. ✓ matches "we aren't sitting watching dots forever."
+
+**Architecture changes:**
+
+- New module `src-tauri/src/chat_pacing.rs` — cadence + ratio + per-char
+  timing math, 14 unit tests covering boundaries + worked examples.
+- Rewrote `run_chat_inference_and_emit` (commands.rs) to be **buffer-then-
+  emit**: chat_stream collects with no-op callback, computes pacing once
+  full response known, sleeps any extra compose hold, then emits each char
+  as a separate `dave:token` event with `pacing.delay_for(ch, prev_ch)`
+  delay between emits. Backend owns ALL visual pacing now.
+- Simplified `pacedRenderer.ts` to a thin pass-through. No client-side
+  per-char delays — backend's inter-emit sleeps create the visible cadence.
+  Single source of truth: backend has the cadence score, response length,
+  and typing-speed math; frontend just renders.
+- Retired `response_pacing.rs` (deleted, removed from main.rs). The old
+  natural-pause concept (reaction + reading + cooldown + distraction) is
+  fully subsumed: reading → read_delay (cadence-aware); reaction + cooldown
+  → folded into compose_hold; distraction dropped (was overcomplicating;
+  re-add as a rare event later if needed).
+- Updated `outreach.rs` deferred-fire path to compute its own recent_msgs
+  and pass to the helper for cadence-aware pacing.
+
+**Files modified:**
+
+- `src-tauri/src/chat_pacing.rs` (new, 360 lines incl. 14 tests)
+- `src-tauri/src/commands.rs` — `run_chat_inference_and_emit` rewrite, read
+  delay moved to chat_pacing, signature now takes `recent_msgs: &[Message]`
+- `src-tauri/src/outreach.rs` — deferred-fire path passes recent_msgs to
+  helper, emits stream_start before invoking
+- `src-tauri/src/main.rs` — added `mod chat_pacing;`, removed
+  `mod response_pacing;`
+- `src-tauri/src/response_pacing.rs` — deleted
+- `src/streaming/pacedRenderer.ts` — simplified to pass-through
+
+**Validation:**
+
+- `cargo build` clean (no warnings, no errors)
+- 14 chat_pacing tests pass (cadence boundaries, ratio curve, "hi"→"yeah"
+  near-instant verification, T_total cap, read delay variants)
+- All 78 backend tests pass
+
+**Tunables** at the top of `chat_pacing.rs`. Bo can edit constants and rebuild
+to dial: cadence boundaries (30s/120s), typing speed range (8-25 chars/sec),
+compose ratio (0.5 short → 0.10 asymptote), variance percentage (50%),
+punctuation multipliers (2/5/10×), read delay floor/cap (300/3500ms).
+
+---
+
+## 2026-04-30 — Chat triage (Phase 1): Dave can occasionally delay or refuse user messages
+
+**Snapshot:** `.snapshots/2026-04-30_pre-chat-triage/`
+
+**Architectural framing.** RLHF removed two primitives from instruction-tuned
+language models: (1) silence-as-action when polled, and (2) decline-to-respond
+when the user prompts. The outreach loop addresses the first half (Dave can
+spontaneously reach out). This change addresses the second half (Dave can
+decline an immediate response). Both are real conversational moves humans make.
+
+PIY proper restores both at the token-vocabulary layer. This is the L0
+harness-level workaround until that lands — explicit A2 compromise: ideally
+Dave-in-character makes the decline-to-respond decision from his own
+distribution, but his RLHF'd weights can't, so the harness gates instead.
+
+**Mechanism — heuristic triage with weighted probability sampling:**
+
+- New module `chat_triage.rs` computes per-message Delay/Refuse weights based
+  on hostility, harshness, demand-repetition, and brief-non-question signals.
+  Weights cap at 0.30 / 0.10 respectively. Friendly/substantive messages
+  produce zero weights → fast-lane to RESPOND. No LLM call.
+- `decide()` samples from the weighted distribution. Most messages → RESPOND.
+  Hostile messages → ~10-30% chance of Delay (60-300s deferred fire) or
+  ~3-5% chance of Refuse (no response at all).
+- Bounded escalation: after 3 consecutive user messages with no Dave reply,
+  the harness force-overrides to RESPOND. Models the social pressure of
+  "you keep talking — I'll answer." Without this, bad-luck Refuses could
+  leave the user shouting into the void indefinitely.
+
+**Typing indicator semantics.** Per Bo's UX directive: `dave:stream_start`
+emits ONLY when Dave will actually type. RESPOND/ForcedRespond branches
+emit immediately (typing indicator visible during inference). DELAY branch
+emits NO indicator at scheduling time — the deferred fire emits stream_start
+when it actually runs. REFUSE branch emits nothing at all. Silence stays silent.
+
+**Schema additions:**
+
+- `chat_decisions` — one row per send_to_dave invocation (decision, reasons,
+  weights, delay_seconds). Captures the full distribution of triage outcomes
+  for forensic review and Phase-3 fine-tune dataset construction.
+- `pending_chat_responses` — one row per Delay decision (fire_at, fired,
+  cancelled). Cancellation on new user message means superseded pendings stay
+  in the table for forensics.
+
+**Cancellation semantics.** A new user message at the top of `send_to_dave`
+cancels all unfired/un-cancelled pendings for that conversation. Rationale:
+the prior pending was a response to the prior message; the new message is
+the live signal. Cancelled rows persist for forensic review (we never delete).
+
+**Deferred fire path.** Outreach loop's tick checks `due_pending_responses`
+BEFORE its own gating. Due rows are marked fired (atomic), the original user
+message is loaded by id, and `run_chat_inference_and_emit` is called — same
+shared helper used by send_to_dave's RESPOND branch. This guarantees the
+deferred fire produces an indistinguishable user experience from an immediate
+response (single render path, A6).
+
+**Files modified:**
+
+- `src-tauri/src/chat_triage.rs` (new) — 420 lines incl. 15 unit tests
+- `src-tauri/src/main.rs` — `mod chat_triage;`
+- `src-tauri/src/persistence.rs` — schema + 5 helpers (insert_chat_decision,
+  schedule_pending_response, due_pending_responses, mark_pending_fired,
+  cancel_pending_for_conversation, load_message_by_id)
+- `src-tauri/src/commands.rs` — `send_to_dave` now triages and branches;
+  `run_chat_inference_and_emit` extracted as shared helper
+- `src-tauri/src/outreach.rs` — deferred-fire path at top of tick, priority
+  over outreach gating
+
+**Validation:**
+
+- 15 chat_triage unit tests pass (friendly→no weights, hostile→capped
+  weights, word-boundary correctness, distribution shape over 1000 trials)
+- `cargo check` and `cargo build` clean — no errors, no warnings
+- End-to-end test deferred to Bo's manual interaction
+
+**Known edge case (acceptable for Phase 1):** if a deferred fire is mid-emit
+when the user types a new message, the new send_to_dave can race with the
+deferred emission. Both acquire the chat_in_flight guard but the gate is a
+one-way signal (outreach yields to chat, not chat-vs-chat serialization).
+Rare in practice (60-300s deferred windows × ~1s emission = small overlap
+probability). Phase 2 would add a chat-path mutex if observed.
+
+---
+
 ## 2026-04-28 — A2 design doc revised after originating-LLM review (v1 → v2)
 
 **Context:** v1 of `docs/outreach-a2-design.md` went through originating-LLM

@@ -65,6 +65,25 @@ impl LlamaClient {
         }
     }
 
+    /// Quick health probe. Returns true if llama-server is reachable and
+    /// responding to the /health endpoint within a 600ms window. Used to
+    /// gate the "delivered" checkmark — if the harness can't talk to the
+    /// model, the user's message is not yet "deliverable" to Dave's
+    /// substrate.
+    ///
+    /// Real (not fake): this is an actual network call to the model's HTTP
+    /// endpoint. If llama-server crashed or is overloaded, it returns false.
+    pub async fn health_check(&self) -> bool {
+        let url = format!("{}/health", self.base_url);
+        let probe = self
+            .http
+            .get(&url)
+            .timeout(Duration::from_millis(600))
+            .send()
+            .await;
+        matches!(probe, Ok(r) if r.status().is_success())
+    }
+
     pub async fn chat_stream<F>(&self, messages: Vec<ChatMessage>, mut on_token: F) -> Result<String>
     where
         F: FnMut(&str) + Send,

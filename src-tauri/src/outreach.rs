@@ -35,7 +35,7 @@ use crate::prompts;
 
 // L1 tunables
 const OUTREACH_TICK_SECONDS: u64 = 30;                // wake every 30s; gate-check is cheap
-const DEFAULT_OUTREACH_THRESHOLD_SECONDS: i64 = 300;  // 5 min default; user-tunable via settings
+const DEFAULT_OUTREACH_THRESHOLD_SECONDS: i64 = 180;  // 3 min default (locked in 2026-05-01 from Bo's tuned setting); user-tunable via settings
 const OUTREACH_THRESHOLD_MIN_SECONDS: i64 = 60;       // 1 min floor (testing)
 const OUTREACH_THRESHOLD_MAX_SECONDS: i64 = 15 * 60;  // 15 min ceiling
 const OUTREACH_BACKOFF_AFTER_SECONDS: i64 = 3600;     // > 1hr -> idle_worker takes over
@@ -113,6 +113,8 @@ pub fn spawn(
                 }
             }
 
+            // Pass &Arc<LlamaClient> to tick so it can clone the Arc when
+            // calling into helpers that need 'static (e.g. fire_deferred_pending).
             match tick(&app, &db, &client, &chat_in_flight, last_decision_at, consecutive_drops).await {
                 Ok(TickOutcome::Skip) => {}
                 Ok(TickOutcome::Reach) => {
@@ -147,11 +149,14 @@ enum TickOutcome {
 async fn tick(
     app: &AppHandle,
     db: &DbHandle,
-    client: &LlamaClient,
+    client: &Arc<LlamaClient>,
     chat_in_flight: &Arc<AtomicBool>,
     last_decision_at: i64,
     consecutive_drops: u32,
 ) -> anyhow::Result<TickOutcome> {
+    // Deref the Arc once for synchronous helper calls (generate_and_score_samples,
+    // discriminator::llm_score). For spawned-task helpers we clone the Arc.
+    let client_ref: &LlamaClient = client.as_ref();
     // ---- Stream-coordination gate (very first check, cheaper than anything else) ----
     // If the chat path is currently streaming a reply to the user, skip this
     // tick entirely. Doing inference now would be wasted: even if the result
@@ -162,6 +167,32 @@ async fn tick(
     if chat_in_flight.load(Ordering::SeqCst) {
         tracing::info!("outreach tick: skip (chat path in flight)");
         return Ok(TickOutcome::Skip);
+    }
+
+    // ---- Deferred chat-response fire — FALLBACK PATH ----
+    //
+    // The primary path is the precise spawned timer in send_to_dave's Delay
+    // branch (zero drift, fires exactly at +seconds). This outreach-tick
+    // sweep is the fallback for the edge case where the spawned timer was
+    // lost — typically app restart with un-fired pendings still in the DB.
+    //
+    // fire_deferred_pending does an atomic claim, so if both paths happen
+    // to race, only one wins. Safe to call from both.
+    if let Ok(due) = persistence::due_pending_responses(db).await {
+        for pending in due {
+            // Both the spawned timer (in send_to_dave's Delay branch) and
+            // this fallback call fire_deferred_pending. The helper does an
+            // atomic claim via persistence::claim_pending_fire — only one
+            // wins and runs; the other no-ops. Safe to call from both.
+            crate::commands::fire_deferred_pending(
+                app.clone(),
+                db.clone(),
+                client.clone(),
+                chat_in_flight.clone(),
+                pending.id,
+            )
+            .await;
+        }
     }
 
     // ---- L1: pre-fire gating ----
@@ -281,7 +312,7 @@ async fn tick(
     // Each candidate runs through the full discriminator chain (heuristic +
     // LLM scorer). We track the result so we can pick the best at the end.
     let candidates = generate_and_score_samples(
-        client,
+        client_ref,
         &messages,
         OUTREACH_SAMPLE_COUNT,
     )
@@ -299,7 +330,41 @@ async fn tick(
 
     match best {
         Some(idx) if candidates[idx].score.unwrap_or(0) >= LLM_SCORE_PASS_THRESHOLD => {
-            // PASS — but first check if the chat path started during our
+            // PASS heuristic + LLM-score, but first run two more pre-emit gates.
+            //
+            // Gate A: dedup against most recent outreach. The substrate prior
+            // can land on near-identical opening sentences across consecutive
+            // fires when the conversation context hasn't changed. Empirically
+            // observed: two reaches differing only by an inserted "still" in
+            // the first sentence. Immersion-breaking — looks like Dave doesn't
+            // see his own prior message. Compare to the most recent
+            // initiated_by_dave message and drop if too similar.
+            if let Ok(Some(prior_reach)) =
+                persistence::last_dave_initiated_message(db, conversation_id).await
+            {
+                if discriminator::is_too_similar_to_last_reach(
+                    &candidates[idx].content,
+                    &prior_reach,
+                ) {
+                    tracing::info!(
+                        "outreach: drop (duplicate_reach: candidate too similar to prior reach, sample {}/{} score={})",
+                        idx + 1, OUTREACH_SAMPLE_COUNT, candidates[idx].score.unwrap_or(0)
+                    );
+                    persist_drop(
+                        db, conversation_id, &candidates[idx],
+                        DropReason::DuplicateReach, &history_shape, presence.last_user_input,
+                    )
+                    .await?;
+                    persist_losing_candidates(
+                        db, conversation_id, &candidates, idx,
+                        &history_shape, presence.last_user_input,
+                    )
+                    .await;
+                    return Ok(TickOutcome::Drop("duplicate_reach"));
+                }
+            }
+
+            // Gate B: stream-coordination — chat path may have started during
             // multi-sample inference (which can take ~10s on a 9B model with
             // N=3 samples). If so, the user is mid-conversation right now and
             // emitting outreach would race with the chat stream. Drop our

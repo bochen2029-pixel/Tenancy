@@ -149,6 +149,23 @@ export const events = {
   onInitError: (cb: (msg: string) => void) =>
     listen<string>('dave:init_error', (e) => cb(e.payload)),
   onDbReset: (cb: () => void) => listen('dave:db_reset', () => cb()),
+  /// Backend persisted the user message and assigned its real id. Frontend
+  /// uses this to reconcile the optimistic-id (negative timestamp) with the
+  /// real DB id, so subsequent delivered/read events can target the right
+  /// message.
+  onUserPersisted: (cb: (msg: { id: number; content: string }) => void) =>
+    listen<{ id: number; content: string }>('dave:user_persisted', (e) => cb(e.payload)),
+  /// First checkmark — harness verified llama-server is reachable.
+  onMessageDelivered: (cb: (messageId: number) => void) =>
+    listen<{ messageId: number }>('dave:message_delivered', (e) =>
+      cb(e.payload.messageId),
+    ),
+  /// Second checkmark — Dave's pipeline has actually engaged with the
+  /// message (read delay + triage decision complete).
+  onMessageRead: (cb: (messageId: number) => void) =>
+    listen<{ messageId: number }>('dave:message_read', (e) =>
+      cb(e.payload.messageId),
+    ),
 };
 
 export const SETTING_KEY_OUTREACH_THRESHOLD = 'outreach_threshold_seconds';
