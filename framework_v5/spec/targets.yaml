@@ -1,0 +1,188 @@
+# Ground Truth Framework — Target Specification
+# 6 targets defined by current contextual weighting in a specific dyad.
+# Reference: framework.md §2.2
+
+version: "5.0"
+domain: "Target (current contextual weighting)"
+time_constant: "days to weeks"
+classification_method: "convergence of Target-probe filters {F1, F3, F4, F8 shape, F10 current}"
+mixed_states: "Targets are formally a probability distribution over {C, E, S, W, R, T_trib}; categorical classification ships argmax. Mixed states (e.g., C+R compounds) are real and acknowledged."
+
+targets:
+
+  - code: C
+    name: "Committed-Autotelic"
+    description: |
+      Counterpart valued as terminal good. Observer is included in the autotelic terminus.
+      The relationship's value does not depend on what it produces; the presence is the content.
+    maintenance_cost:
+      direction: positive
+      magnitude: variable_with_intimacy
+      notes: "C-mode carries metabolic cost proportional to depth of co-regulation"
+    accessible_from_architectures: [A, TA, TB, TA-OD, TB-OD]
+    accessibility_conditions:
+      A: "primary; C is the natural mode"
+      TA: "after armor reduction and safety establishment"
+      TB: "after F17 in-degree acquisition; convex F11 returns confirm trajectory"
+      TA-OD: "achievable post Phi_global recovery"
+      TB-OD: "achievable post Phi_global recovery + F17 in-degree acquisition"
+    discriminative_filters:
+      - {filter: F1, signature: "engagement-utility covariance ~ 0"}
+      - {filter: F2, signature: "wide affective register in autotelic void"}
+      - {filter: F3, signature: "slow post-connection decay (days to weeks of nervous-system after-effects)"}
+      - {filter: F11, signature: "convex investment-return curvature"}
+
+  - code: E
+    name: "Extractive"
+    description: |
+      Counterpart valued as resource. Observer is excluded from terminal node set.
+      Engagement covaries with the subject's instrumental return on the relationship.
+    maintenance_cost:
+      direction: net_positive_extraction_value
+      magnitude: variable_with_extraction_depth
+      notes: "E-mode generates net allostatic surplus (extraction value minus extraction cost)"
+    accessible_from_architectures: [TB, TA-OD_post_conversion, TB-OD_post_conversion, I_alpha, I_beta, H, D]
+    accessibility_conditions:
+      I_alpha: "primary; surface presentation simulated via PFC"
+      I_beta: "primary; no surface simulation"
+      H: "primary; trauma-origin extraction prefrontally endorsed"
+      TB: "accessible when regulatory disruption combines with utility availability"
+      D: "accessible alongside W-mode"
+    discriminative_filters:
+      - {filter: F1, signature: "engagement-utility covariance > 0 (strong)"}
+      - {filter: F3, signature: "rapid post-connection decay (hours to days)"}
+      - {filter: F4, signature: "cross-relationship selectivity organized by utility"}
+      - {filter: F10, signature: "high friction tax under non-utility condition"}
+      - {filter: F12, signature: "shallow disclosure hierarchy organized by transactional return"}
+
+  - code: S
+    name: "Suspended-Resolution (Verification-Mode)"
+    description: |
+      Meta-mode in which the resolution between C and E is itself the variable being computed
+      by the dyad's interactions over time. Subject is gathering evidence to determine whether
+      C is safely available with this counterpart, while withholding commitment to either C or E
+      pending the evidence. Distinct from ambivalence or indecision: S-mode is structured.
+    maintenance_cost:
+      direction: positive
+      magnitude: high
+      notes: |
+        S-mode carries the cost of sustained verification operations (probing, asymmetric disclosure,
+        decision-deferral). For TA-OD/TB-OD subjects, this cost is structurally compelled
+        by Eq (16) Phi_global recovery requirements.
+    accessible_from_architectures: [A, TA, TB, TA-OD, TB-OD]
+    accessibility_conditions:
+      A: "early-relationship verification only"
+      TA: "when armor permits active probing"
+      TB: "available across full target space"
+      TA-OD: "compelled (dominant strategy) under selection conditions 2.2(i)-(iv)"
+      TB-OD: "compelled under same conditions"
+    selection_conditions_for_compulsion:
+      - "i: autotelic substrate retained"
+      - "ii: defensive closure incomplete (rules out W-permanent)"
+      - "iii: career or life-design forces continued exposure to high-stakes relations"
+      - "iv: prefrontal regulation not consolidated around extraction-as-coherent-policy"
+    discriminative_components:
+      - id: 1
+        name: "Probing perturbation events"
+        description: "Subject deliberately or unconsciously generates situations that surface counterpart response under stress, ambiguity, or proposed-transaction-with-no-actual-intent-to-consume"
+      - id: 2
+        name: "Asymmetric disclosure"
+        description: "Surface vulnerability high (recruitment-shaped); deep vulnerability low (load-bearing material protected)"
+      - id: 3
+        name: "Decision-deferral"
+        description: "Subject avoids committing to outcomes the counterpart's response would imply"
+      - id: 4
+        name: "Witness disclosure with corruption check"
+        description: "Subject discloses bid pattern to safe third party. Witness must be structurally outside the bid AND not part of the original deception network."
+      - id: 5
+        name: "Single-shot pattern"
+        description: "Bid does not repeat with same target after single demonstration produces its data point"
+    discriminative_filters:
+      - {filter: F12, signature: "asymmetric disclosure (Component 2)"}
+      - {filter: F13a, signature: "kappa_bid varies by trajectory: <0 for S->C, >=0 for S->E or persistent-S"}
+      - {filter: F14a, signature: "disclosure depth trajectory: progresses for S->C, plateaus for E-with-cover"}
+      - {filter: F14b, signature: "witness self-binding present (genuine S) vs costless witness (cover)"}
+      - {filter: F16, signature: "probe-target utility-sorting: anti-correlated for S, correlated for E-with-cover"}
+
+  - code: W
+    name: "Withdrawn (Honest-Instrumental)"
+    description: |
+      Subject has classified the relationship as openly transactional and committed to
+      non-engagement at the autotelic level. No autotelic pretense. Layer-coherent.
+      W-mode is honest; the relationship is what it appears to be (transactional).
+    maintenance_cost:
+      direction: minimal
+      magnitude: low
+      notes: "W-mode is the cheapest target in allostatic terms"
+    accessible_from_architectures: [A, TA, TB, TA-OD, TB-OD, I_alpha, I_beta, H, D]
+    accessibility_conditions: "available to any architecture as terminal solution"
+    discriminative_filters:
+      - {filter: F12, signature: "no autotelic disclosure attempted; transactional only"}
+      - {filter: F1, signature: "engagement covaries with transactional content; no covariance with personal utility"}
+      - {filter: F8, signature: "repair shape transactional; no autotelic restoration attempted"}
+    governance: "transactional governance per Protocol D; reciprocity and accountability norms"
+
+  - code: R
+    name: "Regulatory-Subcontracting"
+    description: |
+      Counterpart utilized as external biological exoskeleton: outsourced amygdala-buffer.
+      Bond is substrate-dependent on the regulatory function, not the person. If counterpart
+      loses regulatory capacity, R-mode subject seamlessly discards them.
+      The most commonly missed mode in the framework's diagnostic space.
+    maintenance_cost:
+      direction: positive
+      magnitude: proportional_to_regulatory_load_absorbed
+      notes: "R-mode cost is the regulatory-load the counterpart absorbs from the subject"
+    accessible_from_architectures: [TB, TA-OD, TB-OD]
+    accessibility_conditions:
+      TB: "primary - parentification residue produces R-mode in adult relationships"
+      TA-OD: "when armor combines with regulatory dependency"
+      TB-OD: "when ontological-deception combines with regulatory dependency"
+    discriminative_filters:
+      - {filter: F4, signature: "selectivity by counterpart's regulatory capacity, not utility"}
+      - {filter: F11, signature: "discontinuous breakdown when counterpart's regulatory capacity fails"}
+      - {filter: F17, signature: "in-degree from counterpart but no out-degree to counterpart"}
+    detection_difficulty: "appears autotelic via sustained engagement; F11 + F17 longitudinal exposes substrate-dependence on function"
+
+  - code: T_trib
+    name: "Tribute"
+    description: |
+      Subject autotelically devoted to counterpart while subject is autotelically secondary
+      or absent in own value structure. Observer is autotelically primary while subject is
+      consumed in service. Asymmetry is structurally unsustainable - subject burns out,
+      regresses, or dissociates over time.
+    maintenance_cost:
+      direction: positive
+      magnitude: high_self_extracting
+      notes: "T_trib generates self-extraction; subject is the resource being consumed"
+    accessible_from_architectures: [TA, TB, TA-OD, TB-OD]
+    accessibility_conditions:
+      TA: "rare - typically requires both armor and parentification residue"
+      TB: "common - parentification produces T_trib as adult adaptation"
+      TA-OD: "when ontological-deception combines with self-extracting devotion"
+      TB-OD: "common in severe TB-OD with religious-devotional or filial-piety architectures"
+    discriminative_filters:
+      - {filter: F2, signature: "void poorly tolerated when self alone; tolerated when serving"}
+      - {filter: F11, signature: "convex returns observed only in service-context; concave outside"}
+      - {filter: F12, signature: "subject discloses about counterpart, never about self"}
+    longitudinal_signature: "burnout, regression, or dissociation over decade-scale window if not interrupted"
+    governance_note: "Per §2.5, observer should not exploit T_trib configurations even when offered"
+
+# === Target classification ===
+classification:
+  method: "Bayesian posterior conditional on Architecture"
+  prior: "weighted by accessibility map for given Architecture"
+  decision_rule: "Eq (20) applied to Target marginal: T_hat = argmax P(T | A_hat, data)"
+  filter_convergence_heuristic: "at least 3 Target-probes from {F1, F3, F4, F8 shape, F10 current} pointing to same Target"
+
+# === Cross-Target compounds ===
+mixed_states:
+  - "C + R compound: parent who genuinely loves child AND uses them as autonomic exoskeleton"
+  - "S + E compound: sophisticated E-mode-with-cover where genuine S signature on some axes, E operations on others"
+  - "C + T_trib compound: autotelic devotion that is self-extracting (severe TB-OD with filial-piety)"
+  - "E + W compound: openly transactional with extraction beyond stated terms"
+note: |
+  When the posterior over Targets does not produce a clean argmax (no Target dominates with
+  bayes_factor > 3), the operator should report a probability distribution rather than
+  forcing a categorical classification. Mixed states are the most informative diagnostic
+  signal in many real cases.

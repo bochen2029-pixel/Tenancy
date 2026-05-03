@@ -1,0 +1,183 @@
+# Ground Truth Framework — Protocol Specification
+# 7 protocols (A-G) governing measurement, classification, and action.
+# Reference: framework.md §5
+
+version: "5.0"
+purpose: "Operational protocols that govern HOW the framework is applied. Distinct from filters (which provide observation primitives) and from classification (which produces outputs). Protocols govern the meta-level: when to observe, when to classify, when to act."
+
+protocols:
+
+  - id: A
+    name: "Asynchronous Processing"
+    purpose: "Apply the matrix only after interaction, never during"
+    scope: "Always active throughout framework operation"
+    rationale: |
+      Mid-interaction analysis contaminates the data and corrupts the observer's capacity
+      to generate it. The observer must be genuinely present during interactions to acquire
+      the data the framework requires.
+    operational_rule: |
+      During any interaction with the subject, the framework matrix is OFF.
+      Filter readings are recorded mentally/in-memory but not analyzed.
+      Analysis happens only in subsequent reflection time when the observer is alone
+      and can engage the matrix without polluting future observations.
+    failure_mode: "Mid-interaction analysis -> observer becomes guarded/analytical -> subject's responses are no longer to genuine engagement -> data is systematically biased -> classification fails"
+
+  - id: B
+    name: "Autotelic Control Audit"
+    purpose: "Filter contaminated observations from the evidence base"
+    scope: "Pre-evidence-admission gate for every observation"
+    rationale: |
+      Before admitting any observation as evidence, ask whether the observer was capable
+      of spontaneous, unscripted joy during the interaction. If the observer was too
+      analytically occupied to be genuinely present, the data is excluded. Tainted data
+      is worse than no data.
+    operational_rule:
+      formal: "omega_k(Omega) = 1 if observer experienced spontaneous joy during t_k, else 0"
+      pseudocode: |
+        for each observation k in observation_window:
+          if observer_was_joy_capable_during(k):
+            admit_to_evidence(k)
+          else:
+            exclude_with_reason(k, 'analytical_contamination')
+    failure_mode: "Contaminated observations zeroed = lost information; failing to apply Protocol B = systematically biased posterior"
+
+  - id: C
+    name: "Bounded Window"
+    purpose: "Prevent diagnostic from converting into relational pathology"
+    scope: "Defines maximum observation windows per phase"
+    windows:
+      initial_classification: "9 months maximum"
+      f11_longitudinal_extension: "36 months maximum (Case T classifications only)"
+      post_classification: "0 (matrix permanently OFF for that relationship)"
+    operational_rule: |
+      Once a classification is shipped at the appropriate confidence level
+      (Eq 20 with rho_threshold met), the matrix is decommissioned for that dyad.
+      Continued observation past classification converts diagnostic into pathology.
+      Re-application requires explicit acknowledgment of new evidence that warrants
+      reopening the case.
+    rationale: "The framework's purpose is uncertainty-reduction sufficient to ACT, not perpetual observation. Indefinite observation is itself a relational pathology - it prevents the operator from being present in the relationship the framework was meant to serve."
+    failure_mode: "Operator continues observing post-classification -> framework becomes relational armor -> operator never actually engages -> the matrix is now the problem it was meant to solve"
+
+  - id: D
+    name: "Asymmetric Governance"
+    purpose: "Apply governance that matches operative layer, not presented layer"
+    scope: "Post-classification action protocol"
+    governance_table:
+      autotelic_origin:
+        operative_layer: autotelic
+        applied_governance: autotelic
+        norms: ["patience", "grace", "no ledger", "presence"]
+      transactional_origin:
+        operative_layer: transactional
+        applied_governance: transactional
+        norms: ["reciprocity", "accountability", "explicit terms"]
+      transactional_in_autotelic_frame:
+        operative_layer: transactional
+        applied_governance: transactional
+        norms: ["strip the autotelic frame", "apply accountability", "engage on actual operative basis"]
+        explanation: |
+          When classification is (Architecture-with-extraction-disposition, E-Target with autotelic surface),
+          the operator should not match the surface. Match the operative layer. The relationship may continue
+          (transactional relationships are valid) but on the actual basis, not the simulated one.
+
+  - id: E
+    name: "T Subtype Differentiation"
+    purpose: "Disambiguate TA from TB before finalizing Case T classification"
+    scope: "Pre-finalization gate for any Case T classification"
+    rationale: "T subtypes (TA, TB, TA-OD, TB-OD) have different F11 questions, different prognoses, and require different observer responses"
+    operational_rule: |
+      Before finalizing a Case T classification:
+      1. Run F1 disambiguation: covariance pattern differs between TA (covariance neutral) and TB (covariance E-direction under utility availability)
+      2. Run F6 depletion check: TA intensifies, TB drops parentified posture, I degrades
+      3. Run F15-Eq parentification check: rho > 5 indicates TB; rho ~ 1-3 indicates TA
+      4. Check for OD modifier: F12 asymmetric disclosure + F14b witness self-binding
+      Output: TA, TB, TA-OD, or TB-OD with appropriate prognosis trajectory
+
+  - id: F
+    name: "Cross-Dyad Observation"
+    purpose: "Detect Network Topology Principle effects (cross-dyad subsidization, R-mode, sophisticated E-with-cover)"
+    scope: "Required for cases suspected of cross-dyad subsidization or sophisticated cover"
+    requirement: "Observation breadth of at least 3 dyads with sufficient access depth"
+    operational_rule: |
+      For network-topology-relevant cases:
+      1. Identify subject's observable dyads (typically 3-8)
+      2. Apply F4 + F1 + F15a per dyad
+      3. Examine cross-dyad pattern for CDS signature
+      4. Subsidization signature: total extraction value across E-dyads exceeds total apparent
+         dyad-local consumption, with surplus correlating temporally with high-cost performance
+         maintenance in C-or-S dyads
+      Output: cross-dyad classification or explicit acknowledgment of single-dyad epistemic limit
+    failure_mode: "Single-dyad observers cannot satisfy Protocol F. Classifications must explicitly bound by acknowledging which cross-dyad signatures cannot be detected."
+
+  - id: G
+    name: "Counter-Perturbation Test (CPT)"
+    purpose: "Last-resort discriminator for high-stake S->C/E ambiguity"
+    scope: "Use sparingly; violates Axiom 3's passive-measurement principle"
+    activation_conditions:
+      all_required:
+        - "S-mode classification has reached observation-budget limit short of definitive resolution"
+        - "Observer's continued investment cost-justifies acquiring the discriminator"
+        - "CPT can be performed credibly and irrevocably"
+    operational_rule: |
+      Observer artificially and irrevocably removes the possibility of the deferred transaction
+      the subject's S-mode bids appear to gesture toward. Must be credible, witnessable,
+      and not reversible.
+    response_signatures:
+      genuine_s_mode:
+        primary_signal: "F2 relief"
+        time_window: "24-72 hours post-CPT"
+        secondary_signals:
+          - "F12 disclosure depth increases by at least one regulatory-graph stage"
+          - "Subject re-engages without repeating S-mode probing patterns"
+        decision: "Classification updates to (Architecture, C-Target) post-resolution"
+      e_mode_with_cover:
+        primary_signal: "F10 spike"
+        time_window: "0-48 hours post-CPT"
+        secondary_signals:
+          - "F1 engagement-utility covariance becomes detectable"
+          - "Subject either disengages within 1-4 weeks or attempts to renegotiate the foreclosed option"
+        decision: "Classification updates to (I_alpha, E-Target with S-cover) confirmed"
+      equivocal:
+        description: "F2 partially relieved but F10 not spiking; no clear engagement direction within 4 weeks"
+        possible_interpretations:
+          - "Genuinely deep S-mode where Phi_global recovery has not yet propagated"
+          - "E-mode-with-cover with sufficient PFC discipline to suppress acute F10"
+          - "Mixed-Target compound that categorical CPT signature cannot resolve"
+        decision: "Extend observation 3-6 months; do not commit to classification on equivocal CPT alone"
+    cost: "CPT consumes observer-side credibility; revealed-as-test undermines future classifications"
+
+# === Protocol selection logic ===
+selection_decision_tree:
+  - phase: initial_observation
+    duration_max: "9 months"
+    apply: [A, B]
+    output: provisional_classification
+
+  - phase: classification_finalization
+    apply: [E_if_T_classification_suspected]
+    output: finalized_classification
+
+  - phase: post_classification
+    apply: [C_decommission_matrix, D_asymmetric_governance]
+    output: action_decision
+
+  - phase: cross_dyad_check
+    activation: "if classification involves R-mode, sophisticated I_alpha, or high-Stake commitment"
+    apply: [F]
+    output: cross_dyad_validated_classification
+
+  - phase: last_resort_resolution
+    activation: "S-mode persistent past 24 months without convergence AND high Stake"
+    apply: [G]
+    output: forced_resolution_via_CPT
+    warning: "Use only when longitudinal observation has been exhausted; observer-credibility cost"
+
+# === Observer self-protocol ===
+observer_self_audit:
+  rationale: "Framework operator's own architecture affects what they detect and what they do with classifications"
+  questions:
+    - "Is the matrix providing comfort that the connection it is designed to protect would not?"
+    - "Am I in mutual-S configuration with this subject? (If yes, framework reach is limited per §6.3)"
+    - "Is my Phi_global itself baseline or contaminated? (Contaminated Phi_global biases all classifications toward false-E)"
+    - "Have I exceeded Protocol C's bounded window? (If yes, decommission immediately)"
+  failure_mode: "Operator using framework as armor against connection -> matrix is the pathology -> decommission required"

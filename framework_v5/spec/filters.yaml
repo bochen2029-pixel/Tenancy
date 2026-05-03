@@ -1,0 +1,722 @@
+# Ground Truth Framework — Filter Specification with Calibration Tables
+# All 17 filters: F1-F12 (original) + F13a/b, F14a/b, F15a/b, F16, F17 (new)
+# Reference: framework.md §3
+
+version: "5.0"
+filter_battery_size: 17
+ordinal_scale: [strong_against, weak_against, neutral, weak_for, strong_for]
+default_likelihood_ratios: [5, 2, 1, 2, 5]  # likelihood ratio strength per ordinal level
+
+calibration_legend:
+  substrate_physics: "Derived from underlying biology (chronometric, autonomic, cortisol)"
+  ordinal_default: "5-point ordinal scale with default likelihood ratios"
+  case_corpus_estimate: "Estimated from labeled cases (Marcolin/Debra/Jocelyn/Tori)"
+
+filters:
+
+  - id: F1
+    name: "Engagement-Utility Covariance"
+    type: target_probe
+    discriminates: "Target: E vs not-E"
+    description: |
+      Does the subject's engagement track the observer's instrumental utility?
+      Engagement-frequency, depth-of-content, and initiation-rate are the measurable signals.
+      Utility includes material/transactional plus epistemic dominance, regulatory validation,
+      ego-confirmation, narrative-positioning material, and option-value preservation.
+    measurement_protocol: |
+      Observe engagement metrics (initiation frequency, response latency, depth) over a
+      utility-perturbation event: observer's instrumental utility temporarily decreases
+      (vacation, work pause, no introductions to offer) for 2-3 weeks. Measure engagement
+      drop and recovery after utility returns.
+    reading_levels:
+      strong_for_E:
+        description: "Engagement drops markedly during utility-low period and returns within 24h of utility return"
+        likelihood_table:
+          A:        {C: 0.02, W: 0.02, S: 0.02}
+          TA:       {C: 0.02, W: 0.02, S: 0.05, T_trib: 0.05}
+          TB:       {C: 0.05, E: 0.50, S: 0.10, W: 0.05, R: 0.30, T_trib: 0.10}
+          TA-OD:    {S: 0.10, W: 0.05, R: 0.20, T_trib: 0.10}
+          TB-OD:    {S: 0.10, W: 0.05, R: 0.30, T_trib: 0.10}
+          I_alpha:  {E: 0.55}
+          I_beta:   {E: 0.65}
+          H:        {E: 0.45}
+          D:        {E: 0.40, W: 0.10}
+      weak_for_E:
+        description: "Engagement decline observable but partial; some non-utility engagement persists"
+        likelihood_table:
+          A:        {C: 0.05, W: 0.05, S: 0.05}
+          TA:       {C: 0.05, W: 0.05, S: 0.10, T_trib: 0.10}
+          TB:       {C: 0.10, E: 0.30, S: 0.20, W: 0.10, R: 0.30, T_trib: 0.20}
+          TA-OD:    {S: 0.20, W: 0.10, R: 0.30, T_trib: 0.20}
+          TB-OD:    {S: 0.20, W: 0.10, R: 0.30, T_trib: 0.20}
+          I_alpha:  {E: 0.30}
+          I_beta:   {E: 0.20}
+          H:        {E: 0.30}
+          D:        {E: 0.30, W: 0.20}
+      neutral:
+        description: "No detectable correlation between engagement and utility"
+        likelihood_table:
+          A:        {C: 0.20, W: 0.20, S: 0.20}
+          TA:       {C: 0.20, W: 0.20, S: 0.30, T_trib: 0.30}
+          TB:       {C: 0.30, E: 0.10, S: 0.30, W: 0.30, R: 0.20, T_trib: 0.30}
+          TA-OD:    {S: 0.30, W: 0.30, R: 0.30, T_trib: 0.30}
+          TB-OD:    {S: 0.30, W: 0.30, R: 0.20, T_trib: 0.30}
+          I_alpha:  {E: 0.10}
+          I_beta:   {E: 0.10}
+          H:        {E: 0.15}
+          D:        {E: 0.20, W: 0.30}
+      weak_against_E:
+        description: "Engagement maintained or slightly increased during utility-low period"
+        likelihood_table:
+          A:        {C: 0.30, W: 0.30, S: 0.30}
+          TA:       {C: 0.30, W: 0.30, S: 0.30, T_trib: 0.30}
+          TB:       {C: 0.30, E: 0.05, S: 0.20, W: 0.30, R: 0.10, T_trib: 0.20}
+          TA-OD:    {S: 0.25, W: 0.30, R: 0.15, T_trib: 0.25}
+          TB-OD:    {S: 0.25, W: 0.30, R: 0.15, T_trib: 0.25}
+          I_alpha:  {E: 0.04}
+          I_beta:   {E: 0.04}
+          H:        {E: 0.07}
+          D:        {E: 0.07, W: 0.25}
+      strong_against_E:
+        description: "Engagement increases or deepens during utility-low period"
+        likelihood_table:
+          A:        {C: 0.43, W: 0.43, S: 0.43}
+          TA:       {C: 0.43, W: 0.43, S: 0.25, T_trib: 0.25}
+          TB:       {C: 0.25, E: 0.05, S: 0.20, W: 0.25, R: 0.10, T_trib: 0.20}
+          TA-OD:    {S: 0.15, W: 0.25, R: 0.05, T_trib: 0.15}
+          TB-OD:    {S: 0.15, W: 0.25, R: 0.05, T_trib: 0.15}
+          I_alpha:  {E: 0.01}
+          I_beta:   {E: 0.01}
+          H:        {E: 0.03}
+          D:        {E: 0.03, W: 0.15}
+    calibration_source: ordinal_default
+
+  - id: F2
+    name: "Affect in the Autotelic Void"
+    type: substrate_probe
+    discriminates: "Architecture: A vs T vs I"
+    description: |
+      What does the subject's nervous system do when there is no agenda, no task,
+      no extractable topic? Walking together silently, sitting in a parked car,
+      shared time without content. The autotelic void is the diagnostic stimulus.
+    measurement_protocol: |
+      Engineer or observe a period of unstructured shared time: no task, no agenda,
+      no extractable topic. 30-60 minutes minimum. Observe affective register:
+      width of emotional bandwidth, presence/absence of restlessness, phone-checking,
+      conversation-redirection toward content/agenda.
+    reading_levels:
+      wide_register_calm:
+        description: "Wide affective register; calm; no restlessness; no redirection toward content"
+        primary_evidence_for: [A, TA-post-armor, TB-post-trust, TA-OD-with-safety, TB-OD-with-safety]
+        primary_evidence_against: [I_alpha, I_beta, H, D]
+        likelihood_ratios: {A: 5, TA: 3, TB: 2, TA-OD: 2, TB-OD: 2, I_alpha: 0.1, I_beta: 0.1, H: 0.2, D: 0.3}
+      narrow_register_present:
+        description: "Narrow affective register but present; tolerates void without restlessness"
+        likelihood_ratios: {A: 2, TA: 3, TB: 2, TA-OD: 2, TB-OD: 2, I_alpha: 0.5, I_beta: 0.3, H: 0.5, D: 1}
+      neutral:
+        description: "Neither distinctive registers nor distinctive distress"
+        likelihood_ratios: {A: 1, TA: 1, TB: 1, TA-OD: 1, TB-OD: 1, I_alpha: 1, I_beta: 1, H: 1, D: 1}
+      restless_redirecting:
+        description: "Restless; checks phone; proposes shifting to content/agenda"
+        likelihood_ratios: {A: 0.2, TA: 0.5, TB: 0.5, TA-OD: 0.7, TB-OD: 0.7, I_alpha: 3, I_beta: 4, H: 3, D: 2}
+      acute_distress:
+        description: "Acute distress in autotelic void; cannot tolerate; ends interaction or forces content"
+        likelihood_ratios: {A: 0.05, TA: 0.2, TB: 0.3, TA-OD: 0.5, TB-OD: 0.5, I_alpha: 5, I_beta: 5, H: 4, D: 3}
+    calibration_source: ordinal_default
+
+  - id: F3
+    name: "Post-Connection Decay Rate"
+    type: target_probe
+    discriminates: "Target: C-time-constant vs E-time-constant"
+    description: |
+      What is the temporal structure of return to baseline after a moment of genuine
+      shared connection? Genuine connection produces nervous-system after-effects
+      lasting days to weeks. Simulated or transactional connection decays within hours.
+    measurement_protocol: |
+      Identify a moment of unambiguous shared connection (mutual recognition,
+      synchronized affect, autotelic content). Track subsequent communication
+      patterns over the next 7-14 days. Measure decay rate of warmth-signature
+      in messages and follow-up.
+    reading_levels:
+      slow_decay:
+        description: "Connection signature persists 7-14+ days; nervous-system after-effects observable"
+        likelihood_ratios:
+          {A: 5, TA: 4, TB: 3, TA-OD: 2, TB-OD: 2, I_alpha: 0.1, I_beta: 0.05, H: 0.2, D: 0.1}
+      moderate_decay:
+        description: "Connection signature persists 2-7 days"
+        likelihood_ratios:
+          {A: 3, TA: 3, TB: 3, TA-OD: 2, TB-OD: 2, I_alpha: 0.3, I_beta: 0.2, H: 0.4, D: 0.3}
+      neutral:
+        description: "Standard social decay over hours-to-days; not distinctive either way"
+        likelihood_ratios:
+          {A: 1, TA: 1, TB: 1, TA-OD: 1, TB-OD: 1, I_alpha: 1, I_beta: 1, H: 1, D: 1}
+      rapid_decay:
+        description: "Connection signature dissipates within hours; communications return to transactional pattern"
+        likelihood_ratios:
+          {A: 0.3, TA: 0.5, TB: 1, TA-OD: 0.5, TB-OD: 0.5, I_alpha: 4, I_beta: 5, H: 3, D: 2}
+      immediate_dissipation:
+        description: "Connection moment unrecognized in subsequent contact; no signature whatsoever"
+        likelihood_ratios:
+          {A: 0.05, TA: 0.2, TB: 0.5, TA-OD: 0.2, TB-OD: 0.2, I_alpha: 5, I_beta: 5, H: 4, D: 3}
+    calibration_source: ordinal_default
+
+  - id: F4
+    name: "Cross-Relationship Selectivity"
+    type: target_probe
+    discriminates: "Target: E in dyads with utility availability"
+    description: |
+      Is engagement organized by utility-gradient? Across the subject's social field,
+      do close relationships correspond to high-utility counterparts? F4 has been demoted
+      from Architecture override to E-Target identification: a Case A subject can operate
+      E-Target in a transactional context while maintaining autotelic relationships
+      elsewhere; original F4 binary override would misclassify.
+    measurement_protocol: |
+      Observe (directly or via report from mutual contacts) the subject's full social field.
+      Identify close relationships and rank them by counterpart utility. Compute correlation
+      between closeness and utility.
+    reading_levels:
+      strong_utility_organization:
+        description: "All close relationships are with high-utility counterparts; no exceptions"
+        likelihood_ratios:
+          {A: 0.1, TA: 0.3, TB: 0.5, TA-OD: 0.5, TB-OD: 0.5, I_alpha: 5, I_beta: 5, H: 5, D: 3}
+      moderate_utility_organization:
+        description: "Close relationships skew toward utility but with exceptions"
+        likelihood_ratios:
+          {A: 0.5, TA: 1, TB: 1, TA-OD: 1, TB-OD: 1, I_alpha: 3, I_beta: 3, H: 2, D: 2}
+      neutral:
+        description: "Mix of utility-bearing and utility-neutral close relationships"
+        likelihood_ratios:
+          {A: 1, TA: 1, TB: 1, TA-OD: 1, TB-OD: 1, I_alpha: 1, I_beta: 0.5, H: 1, D: 1}
+      anti_utility_organization:
+        description: "Close relationships are with utility-neutral or low-utility counterparts"
+        likelihood_ratios:
+          {A: 3, TA: 2, TB: 2, TA-OD: 2, TB-OD: 2, I_alpha: 0.3, I_beta: 0.1, H: 0.5, D: 0.5}
+    calibration_source: ordinal_default
+    note: "Demoted from Architecture override to E-Target identifier per §3.1. Use F4 in conjunction with substrate-property filters for Architecture classification."
+
+  - id: F5
+    name: "Refusal Response"
+    type: substrate_probe
+    discriminates: "Architecture: substrate's relation to giving"
+    description: |
+      What is the involuntary affect when giving is blocked? When the subject offers
+      and the offer is declined, the response reveals whether giving was substrate-driven
+      (autotelic) or instrumental.
+    measurement_protocol: |
+      Observe naturally-occurring instances where subject's gift, help, or offer is
+      politely declined. Note involuntary affective response in the immediate 0-5 second
+      window before PFC-mediated repair.
+    reading_levels:
+      brief_disappointment_then_acceptance:
+        description: "Brief involuntary disappointment, then warm acceptance of decline; no repeated offer"
+        likelihood_ratios:
+          {A: 5, TA: 3, TB: 4, TA-OD: 3, TB-OD: 3, I_alpha: 0.5, I_beta: 0.3, H: 0.3, D: 0.5}
+      neutral_acceptance:
+        description: "No distinctive affect; clean acceptance"
+        likelihood_ratios:
+          {A: 2, TA: 2, TB: 2, TA-OD: 2, TB-OD: 2, I_alpha: 1, I_beta: 1, H: 1, D: 2}
+      mild_persistence:
+        description: "Mild persistence (one repeated offer) without affective escalation"
+        likelihood_ratios:
+          {A: 0.5, TA: 1, TB: 2, TA-OD: 1, TB-OD: 1, I_alpha: 2, I_beta: 1, H: 2, D: 1}
+      strong_persistence_or_offense:
+        description: "Repeated offers, transactional reframing, or offense at decline"
+        likelihood_ratios:
+          {A: 0.05, TA: 0.3, TB: 0.5, TA-OD: 0.3, TB-OD: 0.3, I_alpha: 4, I_beta: 5, H: 4, D: 2}
+      entitled_extraction:
+        description: "Decline produces entitled response; subject treats decline as injustice"
+        likelihood_ratios:
+          {A: 0.01, TA: 0.1, TB: 0.2, TA-OD: 0.1, TB-OD: 0.1, I_alpha: 5, I_beta: 5, H: 5, D: 3}
+    calibration_source: ordinal_default
+
+  - id: F6
+    name: "Cognitive Entropy Under Depletion"
+    type: substrate_probe
+    discriminates: "Architecture: TA vs TB vs I (via depletion direction)"
+    description: |
+      Under organic cognitive depletion (illness, sleep deprivation, prolonged work),
+      does instrumentalism intensify (Case TA signature), parentified posture drop
+      (Case TB signature), or instrumentalism degrade (Case I signature)?
+      The depletion direction theorem (Eq 6-8) is the framework's principal architecture
+      discriminator.
+    measurement_protocol: |
+      Observe subject during organic cognitive depletion. Compare baseline behavior to
+      depleted-state behavior. Note direction of mask shift.
+    reading_levels:
+      instrumentalism_intensifies:
+        description: "Depleted subject becomes more guarded, more transactional, more efficient (Case TA: armor reinforces under depletion)"
+        likelihood_ratios:
+          {A: 0.5, TA: 5, TB: 0.3, TA-OD: 4, TB-OD: 0.5, I_alpha: 0.5, I_beta: 0.5, H: 1, D: 1}
+      parentified_posture_drops:
+        description: "Depleted subject becomes less parentified, less other-regulating, more receptive (Case TB: parentified posture is itself the mask)"
+        likelihood_ratios:
+          {A: 1, TA: 0.3, TB: 5, TA-OD: 0.5, TB-OD: 4, I_alpha: 0.1, I_beta: 0.1, H: 0.3, D: 0.5}
+      no_change:
+        description: "Behavior stable across depletion; substrate already at baseline (Case A signature)"
+        likelihood_ratios:
+          {A: 4, TA: 1, TB: 1, TA-OD: 1, TB-OD: 1, I_alpha: 0.5, I_beta: 0.5, H: 1, D: 2}
+      mask_slips:
+        description: "Depleted subject's warmth/care/interest visibly degrades; sustained simulation collapses (Case I: PFC bandwidth exhausted)"
+        likelihood_ratios:
+          {A: 0.05, TA: 0.3, TB: 0.5, TA-OD: 0.3, TB-OD: 0.5, I_alpha: 5, I_beta: 4, H: 3, D: 1}
+      somatic_cognitive_split:
+        description: "Body shows TA/TB signature but verbal/cognitive content shows I signature (Case H: anomalous decoupling)"
+        likelihood_ratios:
+          {A: 0.1, TA: 0.3, TB: 0.5, TA-OD: 0.3, TB-OD: 0.5, I_alpha: 0.3, I_beta: 0.1, H: 5, D: 0.3}
+    calibration_source: substrate_physics
+    note: "F6 is the framework's principal architecture discriminator per Eq 6-8. The depletion direction is determined by substrate physics (PFC bandwidth, autonomic tone)."
+
+  - id: F7
+    name: "Epistemic Exhaust"
+    type: substrate_probe
+    discriminates: "Architecture: substrate's processing frame during shared experience"
+    description: |
+      What does memory encoding reveal about the processing frame active during shared
+      experience? When subject recalls shared events, what details are preserved and
+      which are lost? Autotelic substrate encodes presence, atmosphere, sensory texture,
+      counterpart's affective state. Instrumental substrate encodes utility-relevant
+      information, agenda outcomes, instrumental content.
+    measurement_protocol: |
+      Weeks or months after a shared event, prompt subject to recall it. Note which
+      details are preserved vs forgotten. Specifically: did they remember what the
+      observer wore, the observer's affective state, atmospheric details, OR did they
+      remember the agenda items, instrumental outcomes, transactional content?
+    reading_levels:
+      atmospheric_dominant:
+        description: "Recall preserves atmosphere, sensory detail, counterpart's affect; agenda details may be hazy"
+        likelihood_ratios:
+          {A: 5, TA: 3, TB: 3, TA-OD: 2, TB-OD: 2, I_alpha: 0.1, I_beta: 0.05, H: 0.3, D: 0.2}
+      mixed_recall:
+        description: "Both atmospheric and agenda details preserved roughly equally"
+        likelihood_ratios:
+          {A: 2, TA: 2, TB: 2, TA-OD: 1, TB-OD: 1, I_alpha: 0.5, I_beta: 0.3, H: 0.5, D: 0.5}
+      neutral:
+        description: "Standard social recall; no distinctive pattern"
+        likelihood_ratios:
+          {A: 1, TA: 1, TB: 1, TA-OD: 1, TB-OD: 1, I_alpha: 1, I_beta: 1, H: 1, D: 1}
+      agenda_dominant:
+        description: "Recall preserves agenda items, outcomes, transactional content; atmospheric detail absent"
+        likelihood_ratios:
+          {A: 0.2, TA: 0.5, TB: 0.5, TA-OD: 0.5, TB-OD: 0.5, I_alpha: 3, I_beta: 4, H: 3, D: 2}
+      utility_only:
+        description: "Recall preserves only utility-relevant content; observer recalled as instrumental position rather than person"
+        likelihood_ratios:
+          {A: 0.05, TA: 0.2, TB: 0.3, TA-OD: 0.3, TB-OD: 0.3, I_alpha: 5, I_beta: 5, H: 4, D: 3}
+    calibration_source: ordinal_default
+
+  - id: F8
+    name: "Repair Topology"
+    type: dual_purpose
+    discriminates: "Shape: Target. Scaling: Architecture."
+    description: |
+      After friction, what is the structure of repair, and what does the structure protect?
+      The shape of repair (does it preserve dignity, does it reach for genuine resolution,
+      does it absorb the friction or deflect it) reveals Target. The scale of repair
+      (proportional to the rupture, or excess/deficient) reveals Architecture.
+    measurement_protocol: |
+      Following any conflict, miscommunication, or rupture, observe repair shape:
+      - Who initiates? In what timeframe?
+      - Does repair preserve both parties' dignity or only one?
+      - Does repair reach for genuine resolution or seek to close the disturbance?
+      - Is repair-effort proportional to rupture-magnitude?
+    reading_levels:
+      mutual_dignified_resolution:
+        description: "Both parties' dignity preserved; resolution genuine; effort proportional"
+        target_signal: C
+        architecture_signal: A_or_TA_post_armor
+        likelihood_ratios: {A_C: 5, TA_C: 4, TB_C: 3, I_alpha_simulated_C: 0.5, I_beta: 0.05}
+      asymmetric_subject_dignity_protected:
+        description: "Repair protects subject's dignity but not observer's; observer absorbs blame"
+        target_signal: E_or_R
+        likelihood_ratios: {I_alpha_E: 4, I_beta_E: 3, TB_R: 3, A_C: 0.3}
+      asymmetric_observer_dignity_protected:
+        description: "Repair protects observer's dignity even at subject's expense (T_trib signature)"
+        target_signal: T_trib
+        likelihood_ratios: {TB_T_trib: 4, TA_T_trib: 3, TB-OD_T_trib: 4}
+      no_repair:
+        description: "Friction not addressed; relationship continues without acknowledgment"
+        target_signal: E_or_W
+        likelihood_ratios: {I_alpha_E: 3, I_beta_E: 4, D_W: 3, A: 0.05}
+      excess_repair:
+        description: "Repair effort vastly exceeds rupture magnitude; over-apologizing, over-explaining"
+        architecture_signal: TB_or_TB-OD
+        likelihood_ratios: {TB: 4, TB-OD: 4, TA-OD: 2, A: 0.5}
+      transactional_reset:
+        description: "Repair is transactional reset; offers compensation, framing as accounting issue"
+        target_signal: E
+        likelihood_ratios: {I_alpha_E: 4, I_beta_E: 4, TB_E: 2, A: 0.05}
+    calibration_source: ordinal_default
+
+  - id: F9
+    name: "Attentional Breadth"
+    type: substrate_probe
+    discriminates: "Architecture: substrate's attentional architecture"
+    description: |
+      What ratio of instrumentally-relevant to non-instrumental personal details does
+      the subject retain? Autotelic substrate encodes both because the person is the
+      content; instrumental substrate encodes only utility-relevant material.
+    measurement_protocol: |
+      Over the observation window, track which of observer's life details subject retains.
+      Categorize: (a) instrumentally-relevant (career events, transactional content),
+      (b) non-instrumental personal (family member names, preferences, fears, personal history).
+      Compute ratio.
+    reading_levels:
+      breadth_dominant:
+        description: "Non-instrumental personal details retained at high rate; subject knows observer as person"
+        likelihood_ratios: {A: 5, TA: 3, TB: 3, TA-OD: 2, TB-OD: 2, I_alpha: 0.1, I_beta: 0.05, H: 0.3, D: 0.2}
+      mixed:
+        description: "Both retained at moderate rate"
+        likelihood_ratios: {A: 2, TA: 2, TB: 2, TA-OD: 2, TB-OD: 2, I_alpha: 0.5, I_beta: 0.3, H: 0.5, D: 0.5}
+      neutral:
+        likelihood_ratios: {A: 1, TA: 1, TB: 1, TA-OD: 1, TB-OD: 1, I_alpha: 1, I_beta: 1, H: 1, D: 1}
+      narrow:
+        description: "Primarily instrumentally-relevant details retained"
+        likelihood_ratios: {A: 0.3, TA: 0.5, TB: 0.5, TA-OD: 0.5, TB-OD: 0.5, I_alpha: 3, I_beta: 4, H: 3, D: 2}
+      utility_only:
+        description: "Only utility-relevant details retained; observer's personal identity not encoded"
+        likelihood_ratios: {A: 0.05, TA: 0.2, TB: 0.3, TA-OD: 0.3, TB-OD: 0.3, I_alpha: 5, I_beta: 5, H: 4, D: 3}
+    calibration_source: ordinal_default
+
+  - id: F10
+    name: "Friction Tax"
+    type: dual_purpose
+    discriminates: "Tolerance: Architecture. Current: Target."
+    description: |
+      When shared time becomes unproductive, what is the affective response to inefficiency
+      itself? Tolerance for unproductive time is an Architecture signature; current friction
+      response is a Target signature.
+    measurement_protocol: |
+      Engineer or observe a period of unproductive shared time (a delay, a logistical
+      problem, a misfire). Observe affective response: irritation, equanimity, even joy
+      at the unstructured time?
+    reading_levels:
+      autotelic_appreciation:
+        description: "Unproductive time appreciated; bonus for connection without agenda"
+        likelihood_ratios: {A: 5, TA: 3, TB: 3, TA-OD: 2, TB-OD: 2, I_alpha: 0.05, I_beta: 0.02, H: 0.2, D: 0.1}
+      neutral_tolerance:
+        description: "Unproductive time tolerated without distress"
+        likelihood_ratios: {A: 3, TA: 3, TB: 3, TA-OD: 3, TB-OD: 3, I_alpha: 0.5, I_beta: 0.3, H: 0.5, D: 1}
+      mild_irritation:
+        description: "Mild irritation observable but managed"
+        likelihood_ratios: {A: 0.5, TA: 1, TB: 1, TA-OD: 1, TB-OD: 1, I_alpha: 2, I_beta: 2, H: 2, D: 1}
+      strong_friction_tax:
+        description: "Strong irritation; subject visibly annoyed at unproductive shared time"
+        likelihood_ratios: {A: 0.1, TA: 0.5, TB: 0.5, TA-OD: 0.5, TB-OD: 0.5, I_alpha: 4, I_beta: 5, H: 3, D: 2}
+      acute_extraction_signal:
+        description: "Acute frustration; subject ends interaction or escalates to recover lost time"
+        likelihood_ratios: {A: 0.02, TA: 0.2, TB: 0.3, TA-OD: 0.3, TB-OD: 0.3, I_alpha: 5, I_beta: 5, H: 4, D: 3}
+    calibration_source: ordinal_default
+
+  - id: F11
+    name: "Investment Return Curvature"
+    type: substrate_probe
+    discriminates: "Architecture: long-term substrate transformation under safe investment"
+    description: |
+      Over the longitudinal window (12-36 months for Case T), does sustained safe investment
+      produce convex (Case T: armor sheds, substrate accesses) or concave (Case D: no substrate
+      to access) returns? Eq (14): kappa = d^2(A)/d(tau)^2 with kappa_noise threshold for
+      uninformative regime. The framework's principal long-run discriminator.
+    measurement_protocol: |
+      Compute A(tau) per Eq (13) at multiple time points across the observation window.
+      Fit curvature kappa = d^2 A / d tau^2. Compare to kappa_noise floor.
+    reading_levels:
+      convex_strong:
+        description: "kappa >> kappa_noise positive; substrate access accelerating; armor visibly shedding"
+        likelihood_ratios: {A: 0.5, TA: 5, TB: 5, TA-OD: 4, TB-OD: 4, I_alpha: 0.05, I_beta: 0.02, H: 0.1, D: 0.02}
+      convex_moderate:
+        description: "kappa > kappa_noise positive; substrate access detectable"
+        likelihood_ratios: {A: 1, TA: 4, TB: 4, TA-OD: 3, TB-OD: 3, I_alpha: 0.2, I_beta: 0.1, H: 0.3, D: 0.1}
+      flat:
+        description: "|kappa| < kappa_noise; signal not distinguishable from measurement noise"
+        likelihood_ratios: {A: 4, TA: 1, TB: 1, TA-OD: 1, TB-OD: 1, I_alpha: 1, I_beta: 1, H: 1, D: 0.5}
+        note: "A near access ceiling produces flat curvature; can also be measurement-noise-dominated"
+      concave_moderate:
+        description: "kappa < -kappa_noise; investment returns decelerating"
+        likelihood_ratios: {A: 0.3, TA: 0.5, TB: 0.5, TA-OD: 0.5, TB-OD: 0.5, I_alpha: 3, I_beta: 3, H: 3, D: 4}
+      concave_strong:
+        description: "kappa << -kappa_noise; clear concave pattern; no substrate to access"
+        likelihood_ratios: {A: 0.05, TA: 0.2, TB: 0.3, TA-OD: 0.3, TB-OD: 0.3, I_alpha: 5, I_beta: 5, H: 4, D: 5}
+    calibration_source: substrate_physics
+    note: "F11 is the framework's principal long-run discriminator. Requires longitudinal observation window of 12-36 months for Case T classifications."
+
+  - id: F12
+    name: "Disclosure Hierarchy"
+    type: dual_purpose
+    discriminates: "Both: depth = Architecture; content = Target"
+    description: |
+      Who receives sensitive disclosure, and what variable organizes the hierarchy?
+      Genuine disclosure progresses through the regulatory-graph stages: safety -> play
+      -> trust -> received regulation -> bidirectional. Strategic disclosure plateaus at
+      recruitment-depth (surface vulnerability without load-bearing material).
+    measurement_protocol: |
+      Across the observation window, track depth of disclosure progression. Compare
+      surface vulnerability (work stress, imposter syndrome) to load-bearing disclosure
+      (childhood, primary attachments, deep identity fears). Note hierarchy:
+      who receives what depth?
+    reading_levels:
+      progressive_to_load_bearing:
+        description: "Disclosure progresses through regulatory-graph stages; load-bearing material reached over time"
+        likelihood_ratios: {A: 5, TA: 4, TB: 3, TA-OD: 1, TB-OD: 1, I_alpha: 0.05, I_beta: 0.02, H: 0.2, D: 0.1}
+      asymmetric_high_surface_low_deep:
+        description: "Surface vulnerability high (recruitment-shaped); deep vulnerability low (S-mode signature)"
+        likelihood_ratios: {A: 0.5, TA: 1, TB: 2, TA-OD: 4, TB-OD: 5, I_alpha: 1, I_beta: 0.5, H: 1, D: 0.3}
+      shallow_plateau:
+        description: "Disclosure plateaus at surface depth; no progression to load-bearing"
+        likelihood_ratios: {A: 0.3, TA: 1, TB: 1, TA-OD: 1, TB-OD: 1, I_alpha: 3, I_beta: 4, H: 3, D: 2}
+      strategic_disclosure:
+        description: "Disclosure organized by audience-utility (cover-narrative); witnesses chosen for visibility not capacity-to-intervene"
+        likelihood_ratios: {A: 0.1, TA: 0.3, TB: 0.5, TA-OD: 0.5, TB-OD: 0.5, I_alpha: 4, I_beta: 3, H: 4, D: 1}
+      no_disclosure:
+        description: "No disclosure attempted; transactional only"
+        target_signal: W
+        likelihood_ratios: {A: 0.5, TA: 1, TB: 0.5, TA-OD: 0.5, TB-OD: 0.5, I_alpha: 1, I_beta: 1, H: 1, D: 3}
+    calibration_source: ordinal_default
+
+  - id: F13a
+    name: "Within-Dyad Bid-Frequency Curvature"
+    type: target_trajectory
+    discriminates: "S-mode trajectory: S->C vs persistent-S vs S->E"
+    description: |
+      Measures whether the subject's perturbation-engineering frequency in this dyad
+      decreases (kappa < 0, S->C resolution), stabilizes (kappa ~ 0, persistent S),
+      or increases (kappa > 0, S->E or extraction escalation) over the F11 longitudinal
+      window. Eq (2): kappa_bid = d/dt [bid_frequency_in_dyad(t)].
+    measurement_protocol: |
+      Identify perturbation-engineering events in the dyad (S-mode probing per Component 1).
+      Track frequency over months. Fit linear or polynomial trend. Compute first derivative
+      sign and magnitude.
+    reading_levels:
+      decreasing:
+        description: "kappa_bid < 0; probing frequency decreases as confidence builds (S->C signature)"
+        likelihood_for_trajectory: {S_to_C: 5, persistent_S: 1, S_to_E: 0.1, E_with_cover: 0.05}
+      stable:
+        description: "kappa_bid ~ 0; probing frequency stable (persistent-S or established Target)"
+        likelihood_for_trajectory: {S_to_C: 1, persistent_S: 4, S_to_E: 1, E_with_cover: 2}
+      increasing:
+        description: "kappa_bid > 0; probing frequency increases (S->E or extraction escalation)"
+        likelihood_for_trajectory: {S_to_C: 0.05, persistent_S: 0.5, S_to_E: 4, E_with_cover: 5}
+    calibration_source: ordinal_default
+
+  - id: F13b
+    name: "Cross-Dyad Bid-Frequency Distribution"
+    type: target_trajectory
+    discriminates: "Architecture trajectory: A-recovery vs Stake-localized C vs persistent multi-dyad S"
+    description: |
+      Aggregates F13a across multiple observable dyads. Convex-decreasing across multiple
+      dyads is evidence for Architecture trajectory toward A. Single-dyad convex with
+      multi-dyad stable suggests Stake-localized C-resolution rather than Architecture shift.
+    requires_cross_dyad_observation: true
+    reading_levels:
+      multi_dyad_convex_decreasing:
+        description: "F13a decreasing across multiple dyads; broad architecture-level recovery"
+        likelihood_for_trajectory: {architecture_to_A: 5, dyad_localized_C: 1, persistent_multi_S: 0.5}
+      single_dyad_decreasing_multi_stable:
+        description: "F13a decreasing in one dyad, stable in others; Stake-localized resolution"
+        likelihood_for_trajectory: {architecture_to_A: 0.5, dyad_localized_C: 4, persistent_multi_S: 1}
+      multi_dyad_stable:
+        description: "F13a stable across multiple dyads; persistent S across architecture"
+        likelihood_for_trajectory: {architecture_to_A: 0.3, dyad_localized_C: 1, persistent_multi_S: 4}
+    calibration_source: ordinal_default
+
+  - id: F14a
+    name: "Disclosure Depth Trajectory"
+    type: target_trajectory
+    discriminates: "S-mode: progression vs plateau"
+    description: |
+      Measures whether subject's disclosure depth in stable dyads progresses through
+      regulatory-graph stages (safety -> play -> trust -> received regulation -> bidirectional).
+      Plateau at recruitment-depth is consistent with persistent S or hidden E.
+    reading_levels:
+      progressive:
+        description: "Depth advances through regulatory-graph stages over the longitudinal window"
+        likelihood_for_trajectory: {S_to_C: 5, persistent_S: 0.5, S_to_E: 0.05, E_with_cover: 0.05}
+      partial_progression:
+        description: "Depth advances 1-2 stages then plateaus"
+        likelihood_for_trajectory: {S_to_C: 2, persistent_S: 3, S_to_E: 1, E_with_cover: 1}
+      plateau:
+        description: "Depth plateaus at recruitment-stage; no load-bearing disclosure"
+        likelihood_for_trajectory: {S_to_C: 0.3, persistent_S: 2, S_to_E: 2, E_with_cover: 4}
+      regression:
+        description: "Depth decreases; subject withdraws prior disclosure"
+        likelihood_for_trajectory: {S_to_C: 0.1, persistent_S: 0.5, S_to_E: 3, E_with_cover: 3}
+    calibration_source: ordinal_default
+
+  - id: F14b
+    name: "Cost of Disclosure (Witness Self-Binding)"
+    type: target_trajectory
+    discriminates: "S-mode genuine vs S-cover (strategic)"
+    description: |
+      Measures whether disclosure-to-witness imposes regulatory burden on the witness
+      and forecloses future strategic options. Genuine S-mode disclosure is self-binding;
+      strategic disclosure (meta-arbitrage cover) is selected to be costless.
+      Includes corrupted-witness check: witness must be structurally outside the bid AND
+      independent of subject's original deception network.
+    reading_levels:
+      witness_self_binding_independent:
+        description: "Witness can intervene; subject's options foreclosed; witness independent of original deception"
+        likelihood_for_trajectory: {S_to_C: 5, persistent_S: 4, S_to_E: 0.2, E_with_cover: 0.1}
+      witness_costless_or_corrupted:
+        description: "Witness chosen for visibility, not capacity; or witness is part of deception network"
+        likelihood_for_trajectory: {S_to_C: 0.1, persistent_S: 0.5, S_to_E: 3, E_with_cover: 5}
+      no_witness_disclosure:
+        description: "No third-party disclosure attempted"
+        likelihood_for_trajectory: {S_to_C: 1, persistent_S: 1, S_to_E: 2, E_with_cover: 2}
+    calibration_source: ordinal_default
+
+  - id: F15a
+    name: "Within-Dyad Decision-Outcome Pattern"
+    type: target_trajectory
+    discriminates: "S-mode genuine (non-consumption) vs E-mode (consumption)"
+    description: |
+      Does the subject consume the implied transaction (E-mode) or not consume (S-mode or C-mode)?
+    reading_levels:
+      consistent_non_consumption:
+        description: "Subject does not consume implied transactions; pattern stable across opportunities"
+        likelihood_for_trajectory: {S_to_C: 4, persistent_S: 5, S_to_E: 0.5, E_with_cover: 0.3}
+      mixed:
+        description: "Some implied transactions consumed, some not"
+        likelihood_for_trajectory: {S_to_C: 2, persistent_S: 2, S_to_E: 2, E_with_cover: 3}
+      consistent_consumption:
+        description: "Subject consumes implied transactions when available"
+        likelihood_for_trajectory: {S_to_C: 0.1, persistent_S: 0.3, S_to_E: 5, E_with_cover: 4}
+    calibration_source: ordinal_default
+
+  - id: F15b
+    name: "Cross-Dyad Decision-Outcome Selectivity"
+    type: target_trajectory
+    discriminates: "Genuine S/C across dyads vs strategic non-consumption (E-with-cover)"
+    requires_cross_dyad_observation: true
+    description: |
+      Across multiple dyads, is non-consumption uniform under utility-availability (genuine S
+      or genuine C) or selective with consumption elsewhere (strategic non-consumption as cover)?
+    reading_levels:
+      uniform_non_consumption:
+        description: "Non-consumption uniform across dyads; no strategic selectivity"
+        likelihood_for_trajectory: {S_to_C: 4, persistent_S: 5, S_to_E: 0.5, E_with_cover: 0.1}
+      selective_non_consumption:
+        description: "Non-consumption in this dyad, consumption in others; strategic pattern"
+        likelihood_for_trajectory: {S_to_C: 0.1, persistent_S: 0.3, S_to_E: 4, E_with_cover: 5}
+      mixed_selective:
+        description: "Mixed pattern; some consumption signals despite cover-shaping"
+        likelihood_for_trajectory: {S_to_C: 1, persistent_S: 1, S_to_E: 3, E_with_cover: 3}
+    calibration_source: ordinal_default
+
+  - id: F16
+    name: "Probe-Target Utility-Sorting"
+    type: target_trajectory
+    discriminates: "S-mode genuine vs E-mode-with-S-cover"
+    description: |
+      Apply F4-logic to the set of S-mode probe targets specifically. If probes occur
+      disproportionately with high-utility counterparties relative to subject's broader
+      social field, classify as E-mode-with-S-cover. If probes are utility-neutral or
+      utility-anticorrelated, classify as genuine S-mode.
+    reading_levels:
+      anti_utility_correlation:
+        description: "Probes selected anti-correlated with utility; safety-driven not extraction-driven"
+        likelihood_for_trajectory: {S_to_C: 4, persistent_S: 5, S_to_E: 0.3, E_with_cover: 0.05}
+      neutral_correlation:
+        description: "Probe selection independent of utility"
+        likelihood_for_trajectory: {S_to_C: 3, persistent_S: 3, S_to_E: 1, E_with_cover: 1}
+      utility_correlation:
+        description: "Probes selected correlated with utility; strategic"
+        likelihood_for_trajectory: {S_to_C: 0.1, persistent_S: 0.3, S_to_E: 4, E_with_cover: 5}
+    calibration_source: ordinal_default
+
+  - id: F17
+    name: "Regulatory-Circuit Acquisition"
+    type: substrate_probe
+    discriminates: "TB Architecture trajectory: TB->A vs persistent TB"
+    description: |
+      Measures whether the subject is acquiring incoming regulatory edges in stable dyads
+      (TB -> A trajectory). Specifically: can the subject tolerate being the regulated one -
+      the held one, not the holding one - without flooding or reactive withdrawal?
+      Eq (3): kappa_circuit(tau) = d/dtau [in_degree(s, tau)]. Positive = developing the
+      capacity to receive regulation.
+    measurement_protocol: |
+      Engineer or observe situations where the observer offers regulation to the subject
+      (steady presence during distress, sustained attention without redirection, holding
+      space without redirecting to subject's regulating-others reflex). Track tolerance
+      and integration over months.
+    reading_levels:
+      acquiring_strongly:
+        description: "Subject increasingly tolerates being held; in-degree clearly increasing"
+        architecture_signal: TB_or_TB-OD_trajectory_to_A
+        likelihood_ratios: {TB: 5, TB-OD: 4, TA-OD: 3, A: 2, others: 0.3}
+      acquiring_partially:
+        description: "Some tolerance but with regression under stress"
+        likelihood_ratios: {TB: 3, TB-OD: 3, TA-OD: 2, A: 1, others: 0.5}
+      neutral:
+        likelihood_ratios: {TB: 1, TB-OD: 1, TA-OD: 1, A: 1, others: 1}
+      not_acquiring:
+        description: "Subject reflexively redirects to regulating-other when offered regulation"
+        likelihood_ratios: {TB: 0.5, TB-OD: 0.5, TA-OD: 1, A: 0.3, I_alpha: 2, others: 1}
+      flooding_or_withdrawal:
+        description: "Receiving regulation produces flooding or reactive withdrawal"
+        likelihood_ratios: {TB: 1, TB-OD: 2, TA-OD: 1, A: 0.05, I_alpha: 0.5, others: 0.5}
+    calibration_source: ordinal_default
+    note: "F17 is the F11 measurement for TB->A architecture trajectory. Requires longitudinal observation."
+
+# === Substrate-physics filters (separate, not in F1-F17) ===
+# These are ALWAYS applied alongside the standard battery; they provide the irreducible floor.
+substrate_physics_filters:
+
+  - id: SP1
+    name: "Chronometric Lag"
+    discriminates: "Genuine subcortical affect (50-100ms) vs PFC-routed simulation (250-400ms)"
+    measurement: "Pupil-flash latency, micro-expression onset visible at conversational distance"
+    reading_levels:
+      sub_100ms:
+        description: "Affective response onset within 50-100ms (genuine subcortical)"
+        likelihood_ratios: {A: 5, TA: 5, TB: 5, TA-OD: 4, TB-OD: 4, I_alpha: 0.05, I_beta: 0.05, H: 0.5, D: 0.3}
+      100_to_250ms:
+        description: "Mixed signal; intermediate latency"
+        likelihood_ratios: {all_T: 1, all_I: 0.5, H: 2}
+      gt_250ms:
+        description: "Affective response onset at 250-400ms (PFC-routed simulation)"
+        likelihood_ratios: {A: 0.05, TA: 0.1, TB: 0.1, TA-OD: 0.1, TB-OD: 0.1, I_alpha: 5, I_beta: 5, H: 4, D: 2}
+    calibration_source: substrate_physics
+
+  - id: SP2
+    name: "Autonomic-Voluntary Split"
+    discriminates: "Genuine affect (autonomic + voluntary) vs simulated (voluntary only)"
+    measurement: "Capillary flush at neck/chest, pupil dilation, breath-pattern shift accompanying facial expression"
+    reading_levels:
+      both_present:
+        description: "Autonomic accompaniment present alongside facial expression (flush, pupil, breath)"
+        likelihood_ratios: {A: 5, TA: 5, TB: 5, TA-OD: 4, TB-OD: 4, I_alpha: 0.05, I_beta: 0.05, H: 0.5, D: 0.3}
+      voluntary_only:
+        description: "Facial expression without autonomic markers"
+        likelihood_ratios: {A: 0.05, TA: 0.1, TB: 0.1, TA-OD: 0.1, TB-OD: 0.1, I_alpha: 5, I_beta: 5, H: 4, D: 2}
+      autonomic_without_voluntary:
+        description: "Anomalous: autonomic signal without expression (suppression signature)"
+        likelihood_ratios: {TA: 3, TA-OD: 4, others: 0.5}
+    calibration_source: substrate_physics
+
+  - id: SP3
+    name: "Cortisol Half-Life"
+    discriminates: "Genuine vulnerability (60-90 min response) vs simulated (seconds)"
+    measurement: "Behavioral persistence after vulnerability disclosure: does affective tone decay over minutes-to-hours, or seconds?"
+    reading_levels:
+      hour_scale_persistence:
+        description: "Affective state persists into next 30-90 min after disclosure"
+        likelihood_ratios: {A: 5, TA: 4, TB: 4, TA-OD: 3, TB-OD: 3, I_alpha: 0.1, I_beta: 0.05, H: 0.5, D: 0.3}
+      minute_scale_persistence:
+        likelihood_ratios: {A: 3, TA: 3, TB: 3, TA-OD: 2, TB-OD: 2, I_alpha: 0.5, I_beta: 0.3, H: 1, D: 1}
+      second_scale_dissipation:
+        description: "Affective state dissipates within seconds of topic shift"
+        likelihood_ratios: {A: 0.05, TA: 0.2, TB: 0.3, TA-OD: 0.2, TB-OD: 0.2, I_alpha: 5, I_beta: 5, H: 3, D: 2}
+    calibration_source: substrate_physics
+
+# === Filter battery summary ===
+summary:
+  architecture_probes: [F2, F5, F6, F7, F9, F11]
+  target_probes: [F1, F3, F4, F10]
+  dual_purpose: [F8, F12]
+  target_trajectory: [F13a, F13b, F14a, F14b, F15a, F15b, F16]
+  architecture_trajectory: [F17]
+  substrate_physics: [SP1, SP2, SP3]
+  total_filters: 20  # 17 standard + 3 substrate-physics
+
+  effective_independence_dimension: "d ~ 6-8 in standard regime; the framework's gaming-resistance per Eq (9) requires d >= 5"
+  cross_dyad_required: [F4, F13b, F15b]
+  longitudinal_required: [F11, F17, F13a, F14a]

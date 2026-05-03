@@ -1,0 +1,170 @@
+# Test Case 05: Ego-Syntonic Hybrid / Extractive
+# Trauma-origin substrate prefrontally endorsed; somatic-cognitive decoupling produces
+# anomalous filter patterns. The proxy-who-runs-the-kill-list pattern (Debra-class).
+# Reference: framework.md (synthetic case abstracted from Case GTP_2026_002)
+
+case_id: "GTPv5-TEST-05"
+title: "H x E: Ego-syntonic hybrid - somatic markers point T, cognitive markers point I"
+case_type: "synthetic_abstracted_from_corpus"
+expected_classification:
+  architecture: "H"
+  target: "E"
+  stake: "moderate"
+  confidence: "standard"  # H signature is anomalous; bayes factor lower than clean cases
+
+scenario: |
+  Subject S has H architecture - trauma origin (genuine relational injury in development)
+  that has been prefrontally endorsed and integrated into a coherent extraction-policy.
+  Functionally I_alpha but with somatic-cognitive decoupling that produces mixed
+  filter signals. The trauma origin is no longer experienced as injury; it has been
+  narratively repackaged as identity ("I survived; this is just how I operate").
+
+  S operates in an institutional position where extraction is rewarded and rationalized.
+  The somatic markers retain T-architecture signature (cortisol response intact, capillary
+  flush present in genuine moments) but the cognitive operation is consistently I-extraction.
+
+setup:
+  duration_months: 12
+  cross_dyad_breadth: 4
+  observer_joy_capability_rate: 0.6
+  stake:
+    arch_fraction: 0.25
+    replaceability: 0.5
+    alpha: 0.5
+    expected_value: 0.375  # moderate
+
+filter_readings:
+  - filter: F1
+    level: weak_for
+    timestamp: 3.0
+    notes: |
+      Engagement covariance with utility moderate (not strong like I_alpha pure case).
+      Subject maintains some baseline engagement during observer's low-utility periods,
+      but pattern bends toward utility direction.
+
+  - filter: F2
+    level: narrow_register_present
+    timestamp: 5.0
+    notes: |
+      Wide register absent but narrow register present without restlessness; subject
+      tolerates void. Body shows substrate signature (not the I_alpha restlessness)
+      but cognitive content is task-redirective.
+
+  - filter: F3
+    level: rapid_decay
+    timestamp: 4.5
+    notes: |
+      Connection moments dissipate within hours. Despite somatic substrate signature,
+      Target time-constant is E.
+
+  - filter: F4
+    level: moderate_utility_organization
+    timestamp: 6.0
+    notes: |
+      Cross-relationship selectivity: skews toward utility but not strongly. Some
+      utility-neutral relationships present (relics of pre-conversion life).
+
+  - filter: F5
+    level: mild_persistence
+    timestamp: 4.0
+    notes: |
+      Refusal Response: brief disappointment present (substrate signature) followed
+      by mild persistence (extraction-policy signature). Mixed.
+
+  - filter: F6
+    level: strong_against
+    timestamp: 8.0
+    notes: |
+      THE DIAGNOSTIC FILTER FOR H: Under cognitive depletion, somatic-cognitive split
+      observed. Body shows T-architecture signature (autonomic tone present, no
+      restlessness) BUT verbal/cognitive content shows I-architecture mask-slipping.
+      The decoupling is the H signature.
+
+  - filter: F7
+    level: agenda_dominant
+    timestamp: 7.0
+    notes: |
+      Recall preserves agenda over atmospheric details. Cognitive frame is instrumental
+      despite the somatic substrate baseline.
+
+  - filter: F8
+    level: asymmetric_subject_dignity_protected
+    timestamp: 8.5
+    notes: |
+      Repair shape protects subject's dignity at observer's expense. Observer absorbs
+      blame for friction. Extraction-policy signature.
+
+  - filter: F9
+    level: narrow
+    timestamp: 9.0
+    notes: |
+      Personal details retention narrow; primarily instrumentally-relevant content.
+
+  - filter: F10
+    level: mild_irritation
+    timestamp: 5.5
+    notes: |
+      Friction tax present but managed; mild irritation observable but PFC-controlled.
+
+  - filter: F11
+    level: flat
+    timestamp: 12.0
+    notes: |
+      F11 longitudinal: A(tau) trajectory flat. No convex acceleration despite somatic
+      substrate signature. Substrate present but not accessed; the prefrontal endorsement
+      has converted substrate into a managed asset rather than a relational capacity.
+
+  - filter: F12
+    level: strategic_disclosure
+    timestamp: 10.0
+    notes: |
+      Disclosure organized by audience-utility. Witnesses chosen for visibility, not
+      capacity-to-intervene. Strategic disclosure signature; not load-bearing material
+      shared with structurally outside witnesses.
+
+  - filter: SP1
+    level: 100_to_250ms
+    timestamp: 7.5
+    notes: |
+      Chronometric lag intermediate; not clean sub-100ms (would suggest pure T) nor
+      clean >250ms (would suggest pure I). Mixed signal characteristic of H.
+
+  - filter: SP2
+    level: both_present
+    timestamp: 7.7
+    notes: |
+      Autonomic accompaniment IS present alongside facial expression. Cortisol substrate
+      not abandoned. The body still has T-architecture; the cognition is I.
+
+  - filter: SP3
+    level: minute_scale_persistence
+    timestamp: 8.0
+    notes: |
+      After vulnerable disclosure, affective tone persists into next 10-30 minutes.
+      Faster than genuine T (60-90 min) but slower than pure I (seconds). Intermediate.
+
+# === Expected classifier output ===
+expected_posterior_signals:
+  - "Architecture posterior split between H and I_alpha; H wins by F6 somatic-cognitive split"
+  - "Target posterior dominated by E (>0.6)"
+  - "Bayes factor > 10 (standard) but < 30 (not high_confidence) due to anomaly handling"
+  - "Substrate-physics intermediate (SP1 100-250ms, SP3 minute-scale) is the H fingerprint"
+  - "F6 strong_against (somatic-cognitive split) is the principal architecture-discriminating filter for H"
+
+expected_recommended_action: |
+  Per Protocol D: Apply transactional governance. The somatic substrate signature does
+  NOT recover the relationship for autotelic engagement; the cognitive operation is
+  consistently extractive. Strip the autotelic frame.
+  Per Protocol E: Subtype differentiation completed; H confirmed by F6 somatic-cognitive
+  split signature.
+  Per Protocol C: Decommission matrix; classification is at standard confidence.
+  Note: H is the architecture pattern observed in CASE_GTP_2026_002 (Debra). The
+  framework correctly classifies this pattern even though the somatic substrate
+  could mislead a less-discriminating classifier into Case T.
+
+note: |
+  H is the most diagnostically subtle architecture in the framework. Without F6
+  somatic-cognitive split detection, H is misclassified as either I_alpha (missing
+  the substrate signature) or TA (missing the prefrontal endorsement). The framework's
+  ability to detect H depends critically on observation quality of the F6 depletion-direction
+  signature plus substrate-physics intermediate readings (SP1, SP3).

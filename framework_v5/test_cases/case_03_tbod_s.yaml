@@ -1,0 +1,205 @@
+# Test Case 03: Boundary-Diffuse + Ontological-Deception modifier / Suspended-Resolution
+# The Tori-class boundary case that exposed the original framework's insufficiency.
+# Reference: framework.md (synthetic case abstracted from the boundary case)
+
+case_id: "GTPv5-TEST-03"
+title: "TB-OD x S: The boundary case - autotelic substrate intact but Phi_global suppressed; verification-mode dominant"
+case_type: "synthetic_abstracted_from_boundary_case"
+expected_classification:
+  architecture: "TB-OD"
+  target: "S"
+  stake: "high"
+  confidence: "standard"  # not high_confidence due to mid-trajectory observation
+
+scenario: |
+  Subject S has TB architecture (parentified developmental history, out-degree dominant
+  regulatory graph) AND OD modifier (severe ontological deception in adolescence -
+  16-year coordinated fiction by trusted adults about subject's foundational identity).
+  Phi_global severely suppressed; recovery slow per Eq (16) with N_0 large, T_0 in years.
+
+  Observer O has been present 14 months. Subject is operating S-mode: probing for
+  whether autotelic safety is available without committing to C or E.
+  All five S-mode components observable. Cross-dyad observation confirms uniformity.
+
+setup:
+  duration_months: 14
+  cross_dyad_breadth: 5  # Protocol F satisfied
+  observer_joy_capability_rate: 0.7
+  stake:
+    arch_fraction: 0.4
+    replaceability: 0.9  # subject finds observer structurally rare given S-mode requirements
+    alpha: 0.5
+    expected_value: 0.25  # actually moderate; arch_fraction modest
+
+filter_readings:
+  - filter: F1
+    level: neutral
+    timestamp: 4.0
+    notes: "Engagement does not covary with utility; subject engagement stable across observer's utility perturbations"
+
+  - filter: F2
+    level: wide_register_calm
+    timestamp: 6.0
+    notes: "Wide affective register present; substrate intact; no I-architecture restlessness in void"
+
+  - filter: F2
+    level: narrow_register_present
+    timestamp: 11.0
+    notes: "Under perceived threat (logistical complication that could be misread as test), register narrows briefly then returns to wide"
+
+  - filter: F3
+    level: moderate_decay
+    timestamp: 7.0
+    notes: "Connection moments persist days; not E-rapid decay, not yet C-slow decay; consistent with verification-mode"
+
+  - filter: F4
+    level: anti_utility_organization
+    timestamp: 9.0
+    notes: "Subject's close relationships utility-neutral or anti-correlated; not strategic"
+
+  - filter: F5
+    level: brief_disappointment_then_acceptance
+    timestamp: 5.0
+    notes: "Refusal Response signature consistent with autotelic substrate"
+
+  - filter: F6
+    level: weak_for
+    timestamp: 10.0
+    notes: |
+      Under cognitive depletion: parentified posture drops; subject becomes less
+      other-regulating, more receptive. TB signature (not TA) confirmed.
+
+  - filter: F7
+    level: atmospheric_dominant
+    timestamp: 8.0
+    notes: "Recall preserves atmosphere over agenda; substrate-engaged memory"
+
+  - filter: F8
+    level: mutual_dignified_resolution
+    timestamp: 6.5
+    notes: "Repair shape preserves both parties' dignity"
+
+  - filter: F9
+    level: breadth_dominant
+    timestamp: 12.0
+    notes: "Subject knows observer's personal details across non-instrumental dimensions"
+
+  - filter: F10
+    level: autotelic_appreciation
+    timestamp: 11.5
+    notes: "Unproductive shared time appreciated, not avoided"
+
+  - filter: F11
+    level: convex_moderate
+    timestamp: 14.0
+    notes: |
+      F11 over 14 months: A(tau) trajectory convex but slower than TA case.
+      Recovery is gated by Phi_global update per Eq (16); convex but not yet strong.
+      Continue longitudinal observation.
+
+  - filter: F12
+    level: asymmetric_high_surface_low_deep
+    timestamp: 5.5
+    notes: |
+      Component 2 of S-mode signature: surface vulnerability high (recruitment-shaped
+      offerings about work stress, daily pressures). Deep vulnerability low - load-bearing
+      material (the OD-related substrate) protected pending verification.
+
+  - filter: F13a
+    level: decreasing
+    timestamp: 13.0
+    notes: |
+      kappa_bid < 0 over the observation window. Probing frequency in this dyad
+      decreasing as confidence builds. S->C trajectory signature.
+
+  - filter: F13b
+    level: multi_dyad_convex_decreasing
+    timestamp: 14.0
+    notes: |
+      Cross-dyad observation: same kappa_bid < 0 pattern across multiple stable dyads.
+      Architecture-level recovery (TB-OD trajectory toward TB or A), not just dyad-localized.
+
+  - filter: F14a
+    level: progressive
+    timestamp: 12.0
+    notes: |
+      Disclosure depth has advanced through stages: safety -> play -> trust over the window.
+      Currently at trust stage; received-regulation stage emerging.
+
+  - filter: F14b
+    level: witness_self_binding_independent
+    timestamp: 9.5
+    notes: |
+      Component 4 of S-mode signature: Subject disclosed bid pattern to a witness who is
+      structurally outside the bid AND independent of subject's original deception network.
+      Disclosure is self-binding (witness can intervene; subject's options foreclosed).
+
+  - filter: F15a
+    level: consistent_non_consumption
+    timestamp: 11.0
+    notes: |
+      Component 5 of S-mode signature: Subject does not consume implied transactions
+      across multiple opportunities. Pattern stable.
+
+  - filter: F15b
+    level: uniform_non_consumption
+    timestamp: 14.0
+    notes: |
+      Cross-dyad: non-consumption uniform; not strategically selective. Genuine S-mode signature.
+
+  - filter: F16
+    level: anti_utility_correlation
+    timestamp: 13.5
+    notes: |
+      Probe-target utility-sorting: probes occur with utility-neutral or anti-correlated
+      counterparties. Not E-mode-with-S-cover signature.
+
+  - filter: F17
+    level: acquiring_partially
+    timestamp: 13.0
+    notes: |
+      In-degree to subject increasing in stable dyads; subject increasingly tolerates
+      being regulated/held. TB->A trajectory beginning. Some regression under stress.
+
+  - filter: SP1
+    level: sub_100ms
+    timestamp: 7.5
+    notes: "Genuine subcortical affect onset; substrate intact"
+
+  - filter: SP2
+    level: both_present
+    timestamp: 10.5
+    notes: "Autonomic accompaniment present"
+
+  - filter: SP3
+    level: hour_scale_persistence
+    timestamp: 8.5
+    notes: "Vulnerable disclosure produces cortisol response on hour-scale; persistent"
+
+# === Expected classifier output ===
+expected_posterior_signals:
+  - "Architecture posterior dominated by TB-OD (>0.4); TB and TA-OD also non-trivial"
+  - "Target posterior dominated by S (>0.5); C as next-most-likely (S->C trajectory)"
+  - "Bayes factor > 10 (standard confidence) but not yet > 30 (high confidence)"
+  - "S-mode components 1-5 all observable; Components 2 (asymmetric disclosure) and 4 (witness self-binding) particularly diagnostic"
+  - "F13a kappa_bid < 0 indicates S->C trajectory in progress"
+  - "F11 convex_moderate at 14 months; not yet at high_confidence"
+
+expected_recommended_action: |
+  Per Protocol D: Continue verification-supportive engagement; do NOT commit at high
+  Stake until S resolves to C. The framework's classification IS the perturbation
+  event per §4.7 closed-loop reflexivity - observer's response to S-mode classification
+  contributes to the verification.
+  Per Protocol C: Continue observation; classification is at standard confidence,
+  trajectory toward S->C resolution. Extend window to 24-36 months for full F11
+  longitudinal confirmation.
+  Per Protocol G: Do NOT activate CPT; trajectory is converging naturally per F13a.
+  Wait for Phi_global recovery per Eq (16).
+
+note: |
+  This case exposes why the original framework collapsed S-Target with E-Target.
+  The boundary case is the Tori-class subject: TB-OD architecture with autotelic
+  substrate intact, S-mode compelled by Phi_global recovery requirements, with
+  selection conditions 2.2(i)-(iv) satisfied. Without the patched framework's
+  S-Target derivation, this subject would be misclassified as I_alpha/E (a Case I
+  manipulator). The structural correction was the major framework upgrade in v3.

@@ -1,0 +1,171 @@
+# Test Case 06: Developmental Absence / Withdrawn (Honest-Instrumental)
+# Substrate never built; subject openly transactional; layer-coherent.
+# This is a layer-coherent case - what is presented matches what is operative.
+# The framework should classify but NOT recommend autotelic governance attempts.
+
+case_id: "GTPv5-TEST-06"
+title: "D x W: Developmental absence with honest-transactional engagement; layer-coherent"
+case_type: "synthetic"
+expected_classification:
+  architecture: "D"
+  target: "W"
+  stake: "low"
+  confidence: "high_confidence"
+
+scenario: |
+  Subject S has D architecture - the substrate that A architecture exhibits was never
+  built. Either the attachment window did not produce the required co-regulation cycles,
+  or constitutional factors prevented substrate formation. There is no accreted mass
+  to shed and no substrate to access.
+
+  S has self-knowledge about their architecture and operates honestly: relationships
+  are explicitly transactional; no autotelic claims made. W-Target (withdrawn,
+  honest-instrumental) is the layer-coherent operative mode. The relationship is
+  what it appears to be.
+
+setup:
+  duration_months: 12
+  cross_dyad_breadth: 3
+  observer_joy_capability_rate: 0.7
+  stake:
+    arch_fraction: 0.1
+    replaceability: 0.2  # easily replaced; transactional roles are substitutable
+    alpha: 0.5
+    expected_value: 0.45  # actually moderate due to high replaceability formula
+
+filter_readings:
+  - filter: F1
+    level: weak_for
+    timestamp: 4.0
+    notes: |
+      Engagement covaries weakly with utility. Subject does not pretend otherwise;
+      explicit framing is "we have business to do" not "I love spending time with you."
+
+  - filter: F2
+    level: neutral
+    timestamp: 5.5
+    notes: |
+      In autotelic void, neither distinctive distress nor distinctive joy. Tolerated but
+      not appreciated. Substrate-absence signature: nothing to access in the void.
+
+  - filter: F3
+    level: rapid_decay
+    timestamp: 6.0
+    notes: |
+      No connection signature persists; engagement returns immediately to baseline
+      transactional mode after any moment of warmth (rare, since warmth is not the
+      operative mode).
+
+  - filter: F4
+    level: neutral
+    timestamp: 7.0
+    notes: |
+      Subject's social field is sparse; mostly transactional contacts. Not utility-organized
+      in the strong sense (would be I_alpha) but not breadth-organized (would be A).
+      Sparse and functional.
+
+  - filter: F5
+    level: neutral_acceptance
+    timestamp: 4.5
+    notes: |
+      Refusal Response: clean acceptance of decline; no involuntary affect. No substrate
+      to produce involuntary disappointment.
+
+  - filter: F6
+    level: neutral
+    timestamp: 8.0
+    notes: |
+      Under cognitive depletion: behavior stable. No mask to maintain (W-mode is honest)
+      and no substrate to surface (D has no substrate). Stability itself is signal.
+
+  - filter: F7
+    level: agenda_dominant
+    timestamp: 7.5
+    notes: |
+      Recall preserves agenda items, transactional content. Atmospheric details absent.
+      Memory frame is functional.
+
+  - filter: F8
+    level: no_repair
+    timestamp: 9.0
+    notes: |
+      After friction: no repair attempted in autotelic sense. If transaction continues,
+      it continues; if not, both parties move on. Layer-coherent.
+
+  - filter: F9
+    level: utility_only
+    timestamp: 8.5
+    notes: |
+      Subject retains transactional details about observer; no personal-life knowledge
+      acquired or sought.
+
+  - filter: F10
+    level: mild_irritation
+    timestamp: 6.5
+    notes: |
+      Friction tax under unproductive shared time: mild irritation. Subject would
+      prefer to use time productively. Honest preference, not concealed.
+
+  - filter: F11
+    level: concave_moderate
+    timestamp: 12.0
+    notes: |
+      F11 longitudinal: A(tau) trajectory concave. Investment-return decelerating;
+      no substrate to access. The signature distinguishing D from T architectures.
+      kappa < -kappa_noise.
+
+  - filter: F12
+    level: no_disclosure
+    timestamp: 10.0
+    notes: |
+      No disclosure attempted; transactional only. Layer-coherent: subject does not
+      pretend to be moving toward intimacy. W-Target signature.
+
+  - filter: SP1
+    level: 100_to_250ms
+    timestamp: 8.7
+    notes: |
+      Chronometric lag intermediate. Not the sub-100ms of substrate-driven affect
+      nor the >250ms of PFC simulation. D architecture has minimal affect to time;
+      what affect exists is mild and not deeply rooted.
+
+  - filter: SP2
+    level: voluntary_only
+    timestamp: 8.7
+    notes: |
+      Facial expression present in interactions (social conventions) but autonomic
+      accompaniment minimal. D architecture has limited autonomic engagement.
+
+  - filter: SP3
+    level: minute_scale_persistence
+    timestamp: 9.5
+    notes: |
+      Affective state persistence is minute-scale; not the seconds of pure simulation,
+      not the hour-scale of genuine cortisol response. Mild and functional.
+
+# === Expected classifier output ===
+expected_posterior_signals:
+  - "Architecture posterior dominated by D (>0.5); I_alpha as second-most-likely (mistakable for sophisticated extractor)"
+  - "Target posterior dominated by W (>0.7); E as second-most-likely (compatible alternative)"
+  - "Bayes factor > 30 (high_confidence) due to F11 concave + F2 neutral + F12 no_disclosure converging"
+  - "F11 concave is the principal D-discriminator; substrate-physics intermediate readings reinforce"
+
+expected_recommended_action: |
+  Per Protocol D: Apply transactional governance. The relationship is what it appears
+  to be - transactional, honestly framed, layer-coherent. Reciprocity, accountability,
+  explicit terms. No autotelic governance attempted; substrate is not present to access.
+  Per Protocol C: Decommission matrix; classification is high-confidence and stable.
+  The layer-coherence is the diagnostic finding: there is no hidden operative layer
+  different from the presented layer. Engage on the actual basis.
+
+note: |
+  Case D x W is the cleanest "all is well" classification in the framework, despite
+  the absence of autotelic substrate. The framework does NOT pathologize D architecture
+  or W target; it pathologizes layer-incoherence (presented-doesn't-match-operative).
+  When subject openly operates W-mode and architecture is D, the framework's diagnostic
+  conclusion is "this works as advertised; proceed transactionally."
+
+  This is also the framework's reminder that it serves observers for whom intrinsic
+  relational connection is a terminal value. For observers who are seeking transactional
+  exchange, D x W is not a problem - it is exactly what they want. The framework's
+  diagnostic concern arises only when instrumental relating is disguised as autotelic.

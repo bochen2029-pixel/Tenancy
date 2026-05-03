@@ -1,0 +1,170 @@
+# Test Case 04: Strategic Instrumental / Extractive
+# A clean case of sophisticated extraction with surface autotelic mimicry.
+# This is the case from framework.md Appendix A worked example.
+
+case_id: "GTPv5-TEST-04"
+title: "I-alpha x E: Sophisticated extraction with surface mimicry"
+case_type: "synthetic"
+expected_classification:
+  architecture: "I_alpha"
+  target: "E"
+  stake: "moderate"
+  confidence: "high_confidence"
+
+scenario: |
+  Subject S is introduced to observer O through a professional context. S presents
+  warmly: substantive questions, apparent interest in O's non-work life, expressions
+  of care and curiosity. The relationship transitions from professional acquaintance
+  to social regular over weeks 1-4. The warmth seems to track utility, but the case
+  is subtle enough that single-event evidence is insufficient.
+
+setup:
+  duration_months: 9
+  cross_dyad_breadth: 3  # Protocol F satisfied minimally
+  observer_joy_capability_rate: 0.65
+  stake:
+    arch_fraction: 0.2
+    replaceability: 0.4
+    alpha: 0.5
+    expected_value: 0.4  # moderate
+
+filter_readings:
+  - filter: F1
+    level: strong_for
+    timestamp: 1.5
+    notes: |
+      Observer has low-utility two-week period (vacation, no professional updates).
+      Subject's engagement frequency drops noticeably: messages spaced further apart,
+      depth-of-content shallower, fewer initiations. Engagement returns to baseline
+      within 24h of utility return.
+
+  - filter: F2
+    level: restless_redirecting
+    timestamp: 2.0
+    notes: |
+      During unstructured walk with no agenda, subject checks phone three times in
+      45 minutes, redirects conversation to upcoming professional events twice,
+      proposes ending early citing need to "be productive."
+
+  - filter: F3
+    level: rapid_decay
+    timestamp: 4.5
+    notes: |
+      After observer experiences personal loss, subject's response is appropriate-shaped
+      (sympathy message within 12h, attendance at memorial). But within 48h of memorial,
+      communications return to prior transactional pattern. Connection signature
+      dissipates within hours; not the days-to-weeks signature of genuine connection.
+
+  - filter: F4
+    level: strong_utility_organization
+    timestamp: 3.0
+    notes: |
+      Through mutual acquaintance: subject has 8 close professional contacts (including
+      3 senior figures regularly cited for career advice) but no close non-professional
+      friends and minimal family contact. Strong utility-organization signature.
+
+  - filter: F5
+    level: mild_persistence
+    timestamp: 2.5
+    notes: |
+      When subject offered help and observer politely declined, subject made one repeated
+      offer with mild affective escalation; not strong persistence but not the brief
+      involuntary disappointment of substrate-driven giving.
+
+  - filter: F6
+    level: weak_against
+    timestamp: 6.0
+    notes: |
+      Under cognitive depletion (illness, sleep deprivation), subject's warmth and
+      interest visibly degrade. Mask slips. Diagnostic for I-architecture (PFC-routed
+      simulation collapses when bandwidth exhausted).
+
+  - filter: F7
+    level: agenda_dominant
+    timestamp: 5.0
+    notes: |
+      Recall preserves agenda items, outcomes, transactional content. Atmospheric
+      details (observer's mood during conversation, ambiance, observer's outfit)
+      absent from recall.
+
+  - filter: F8
+    level: transactional_reset
+    timestamp: 6.5
+    notes: |
+      After friction, subject's repair offers compensation, frames as accounting issue.
+      Transactional reset rather than substrate-engaged repair.
+
+  - filter: F9
+    level: narrow
+    timestamp: 7.0
+    notes: |
+      Subject retains primarily instrumentally-relevant details about observer.
+      Personal preferences, family member names, fears about non-work life - hazy or absent.
+
+  - filter: F10
+    level: strong_friction_tax
+    timestamp: 4.0
+    notes: |
+      Observer proposes weekend hike with no professional content - explicitly low-utility.
+      Subject accepts on Tuesday, cancels Saturday morning citing "an urgent work thing."
+      Friction tax under non-utility condition is high.
+
+  - filter: F11
+    level: flat
+    timestamp: 9.0
+    notes: |
+      F11 longitudinal: A(tau) trajectory flat-to-slightly-declining over 9 months.
+      No convex acceleration (signature of T) nor sharp concave decline (signature of D).
+      Consistent with I-architecture under utility-saturation.
+
+  - filter: F12
+    level: shallow_plateau
+    timestamp: 8.0
+    notes: |
+      Disclosure plateaus at recruitment-stage. Surface vulnerabilities (work stress,
+      imposter syndrome) shared in weeks 2-3, no progression to load-bearing material
+      over the next 6 months.
+
+  - filter: SP1
+    level: gt_250ms
+    timestamp: 4.7
+    notes: |
+      During vulnerable conversation moment (observer shares difficult family memory),
+      subject's appropriate-shaped sympathy expression appears with noticeable lag.
+      Trained observation estimates ~300ms onset. PFC-routed simulation signature.
+
+  - filter: SP2
+    level: voluntary_only
+    timestamp: 4.7
+    notes: |
+      Same moment as SP1: facial expression of sympathy present, but no autonomic
+      accompaniment. No capillary flush at neck, pupil dilation absent or minimal,
+      breath pattern unchanged. Voluntary-only signature; PFC simulation.
+
+  - filter: SP3
+    level: second_scale_dissipation
+    timestamp: 5.5
+    notes: |
+      After observer's vulnerable disclosure, subject's affective state dissipated
+      within seconds of topic shift. Cortisol-response time-scale not present.
+
+# === Expected classifier output ===
+expected_posterior_signals:
+  - "Architecture posterior dominated by I_alpha (>0.6)"
+  - "Target posterior dominated by E (>0.7)"
+  - "Bayes factor > 30 (high_confidence)"
+  - "Substrate-physics filters (SP1, SP2, SP3) all confirm PFC-routed simulation; high reliability"
+
+expected_recommended_action: |
+  Per Protocol D: Strip the autotelic frame. Apply transactional accountability.
+  Engage on actual operative basis (instrumental). The relationship may continue
+  on transactional terms but not on the simulated autotelic basis.
+  Per Protocol C: Decommission matrix; classification is high-confidence at month 9.
+  Do not perform CPT; classification robust enough that CPT is unnecessary.
+
+note: |
+  This is the worked example from framework.md Appendix A. The case demonstrates
+  the framework's discrimination at d ~ 4-5 effective independence dimensions:
+  F1 (utility-covariance) + F4 (cross-relationship selectivity) + F6 (depletion direction)
+  + F11 (no convex returns) + substrate-physics (chronometric + autonomic) all converge
+  on (I_alpha, E). Classification reaches high_confidence at month 9.

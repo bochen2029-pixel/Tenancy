@@ -1,0 +1,283 @@
+# Ground Truth Framework — Equation Specification
+# All formal equations as structured data.
+# Reference: framework.md Appendix B (Equation Index)
+
+version: "5.0"
+
+equations:
+
+  - id: Eq1
+    name: "Filter Response (time-varying)"
+    formula: "sigma_k(t) = partial(B(t)) / partial(P_k(t))"
+    description: |
+      The filter response sigma_k(t) is a time-varying signal: the local sensitivity of
+      behavioral output B(t) to perturbation along axis P_k evaluated at the observed
+      perturbation level at time t. Filter readings are sequences of sigma_k values
+      across perturbation events over the observation window.
+    type: definition
+    references_in_framework: ["§3.2"]
+
+  - id: Eq2
+    name: "Bid Frequency Curvature"
+    formula: "kappa_bid = d/dt [bid_frequency_in_dyad(t)]"
+    description: |
+      Filter F13a measures the first derivative of S-mode bid frequency over time.
+      kappa_bid < 0 indicates S->C trajectory; kappa_bid ~ 0 indicates persistent S;
+      kappa_bid > 0 indicates S->E or extraction escalation.
+    type: filter_definition
+    used_by_filter: F13a
+    references_in_framework: ["§3.3"]
+
+  - id: Eq3
+    name: "Regulatory Circuit Acquisition"
+    formula: "kappa_circuit(tau) = d/dtau [in_degree(s, tau) in observer-s dyad]"
+    description: |
+      Filter F17 measures whether the subject is acquiring incoming regulatory edges
+      in stable dyads. Positive curvature indicates the subject is developing the capacity
+      to receive regulation from the observer (TB->A trajectory).
+    type: filter_definition
+    used_by_filter: F17
+    references_in_framework: ["§3.3", "§4.4"]
+
+  - id: Eq4
+    name: "Steady-State Degeneracy (conditional)"
+    formula: "S_T(t) ~ S_I(t) for all t such that ||P(t)|| < delta_threshold"
+    description: |
+      Under steady-state conditions (perturbation magnitude below threshold delta_threshold),
+      Case T and Case I behavioral outputs are indistinguishable. Eq 4 is conditional on
+      perturbation regime; without the conditional it would directly contradict Eq 5.
+    type: degeneracy_statement
+    references_in_framework: ["§4.1"]
+
+  - id: Eq5
+    name: "Perturbation Discrimination"
+    formula: "partial(S_T)/partial(P) != partial(S_I)/partial(P)"
+    description: |
+      Under perturbation exceeding delta_threshold, Case T and Case I systems' partial
+      derivatives along perturbation axis P diverge. This is the framework's central
+      exploitable asymmetry.
+    type: discriminative_statement
+    references_in_framework: ["§4.1"]
+
+  - id: Eq6
+    name: "F6 Depletion Direction Theorem - TA limit"
+    formula: "Case TA: lim as C_PFC -> 0 of partial(I_mask)/partial(C_PFC) > 0"
+    description: "Under cognitive depletion, TA instrumentalism intensifies (armor reinforces)"
+    type: theorem
+    references_in_framework: ["§4.1"]
+
+  - id: Eq7
+    name: "F6 Depletion Direction Theorem - TB limit"
+    formula: "Case TB: lim as C_PFC -> 0 of I_parentified -> 0"
+    description: "Under cognitive depletion, TB parentified posture drops (substrate surfaces)"
+    type: theorem
+    references_in_framework: ["§4.1"]
+
+  - id: Eq8
+    name: "F6 Depletion Direction Theorem - I limit"
+    formula: "Case I: lim as C_PFC -> 0 of partial(I_mask)/partial(C_PFC) < 0"
+    description: "Under cognitive depletion, I instrumentalism degrades (mask slips)"
+    type: theorem
+    references_in_framework: ["§4.1"]
+
+  - id: Eq9
+    name: "Gaming Cost Theorem (lower bound)"
+    formula: "C_total = sum_{k=1}^{N} C_sim(F_k) >= O(2^d) as d >> 1"
+    description: |
+      Lower bound on metabolic cost of simulating passing scores across d independent
+      perturbation axes. The exponential scaling arises from cross-axis coherence requirements:
+      a simulator must produce coherent responses for each of 2^d axis-activation patterns,
+      whereas authentic substrate generates cross-axis-coherent output as a byproduct
+      of running a single coherent regulatory system.
+    derivation:
+      information_theoretic: "Behavioral policy that passes the framework across d axes must specify coherent responses for 2^d axis-activation patterns; Kolmogorov complexity grows as O(2^d)"
+      metabolic: "Maintaining cross-axis coherence in real-time requires PFC-bandwidth that scales with the number of simultaneously-active coherence constraints; PFC has hard bandwidth ceiling at d~5-6"
+      complexity_theoretic: "Maintaining mutual coherence across all k-subsets of d perturbation axes for k in {2,...,d} gives sum_{k=2}^{d} C(d,k) = 2^d - d - 1 = O(2^d)"
+    type: theorem
+    references_in_framework: ["§4.2"]
+    note: "The exponential lower bound is conservative; actual scaling may be worse"
+
+  - id: Eq10
+    name: "Authentic Cost"
+    formula: "C_auth = O(1)"
+    description: "Authentic substrate runs a single coherent system whose output is automatically cross-axis consistent. Per-perturbation cost is constant in d."
+    type: cost_statement
+    references_in_framework: ["§4.2"]
+
+  - id: Eq11
+    name: "Energy-Momentum Relation"
+    formula: "E^2 = (p*c)^2 + (m_0 * c^2)^2"
+    description: |
+      Relativistic mass-energy relation, used as analogical mapping for the Curvature
+      Discriminant. NOT a load-bearing isomorphism; analogical only. The Curvature
+      Discriminant (Eq 14) does not require relativistic mechanics.
+    type: analog
+    references_in_framework: ["§4.3"]
+    note: "Analogical; not load-bearing"
+
+  - id: Eq12
+    name: "Velocity Asymptote"
+    formula: "dv/dE -> 0 as v -> c, for any m_0 > 0"
+    description: "Analogical: as autotelic access approaches theoretical limit, additional investment converts to instrumental inertia rather than further access"
+    type: analog
+    references_in_framework: ["§4.3"]
+    note: "Analogical; not load-bearing"
+
+  - id: Eq13
+    name: "Autotelic-Access Composite"
+    formula: "A(tau) = sum_{k in {2,3,7,10}} of w_k * sigma_k(tau)"
+    description: |
+      Weighted composite of substrate-property filter readings used in the Curvature
+      Discriminant. Default weights w_k = 1/4 (uniform). Where reliability data available,
+      Fisher-information weighting: w_k = (1/var(sigma_k)) / sum_j (1/var(sigma_j)).
+    type: composite_definition
+    weights:
+      default: {F2: 0.25, F3: 0.25, F7: 0.25, F10: 0.25}
+      fisher_information: "w_k proportional to 1 / var(sigma_k)"
+    references_in_framework: ["§4.3"]
+
+  - id: Eq14
+    name: "Curvature Discriminant"
+    formula: "kappa = d^2(A) / d(tau)^2"
+    description: |
+      Second derivative of the autotelic-access composite over the longitudinal window.
+      Discriminates Case T (kappa > 0, convex) from Case D (kappa < 0, concave) with
+      explicit unhandled-case at |kappa| < kappa_noise.
+    cases:
+      kappa_strongly_positive: "Case T (convex; armor shedding, substrate accessing)"
+      kappa_strongly_negative: "Case D (concave; no substrate to access)"
+      kappa_below_noise_floor: "Insufficient signal: extend window OR Case A near access ceiling OR measurement-noise-dominated"
+    type: discriminator
+    references_in_framework: ["§4.3"]
+    operational: "Compare |kappa| to kappa_noise = var(sigma_composite) / window_length^2"
+
+  - id: Eq15
+    name: "Parentification Signature"
+    formula: "rho(s) = out_degree(s) / (in_degree(s) + epsilon)"
+    description: |
+      Ratio of out-going regulatory edges to in-coming regulatory edges in subject's
+      developmental history. Population baseline 0.5-3; parentification produces inversion.
+    thresholds:
+      flag: "rho > 5 (parentification signature significant)"
+      strong: "rho > 10 (strong parentification)"
+      severe: "rho > 20 (severe parentification, full functional inversion)"
+    type: filter_signature
+    used_by_filter: F15-Eq
+    references_in_framework: ["§4.4"]
+    epsilon_purpose: "epsilon > 0 prevents division by zero when in_degree(s) = 0"
+
+  - id: Eq16
+    name: "Phi_global Asymptotic Recovery"
+    formula: "Phi_global(N, T) = Phi_baseline - (Phi_baseline - Phi_initial) * exp(-(N/N_0) - (T/T_0))"
+    description: |
+      Recovery trajectory for T-OD subjects' meta-prior Phi_global. Asymptotic toward
+      Phi_baseline (population baseline ~0.7-0.9) from Phi_initial (severely suppressed,
+      near 0). N = perturbation events survived (counterexamples); T = elapsed time.
+      N_0, T_0 scale with original deception magnitude.
+    parameters:
+      Phi_baseline: "Population baseline meta-prior, typically 0.7-0.9"
+      Phi_initial: "Initial suppressed value post-T-OD, near 0"
+      N_0: "Counterexample-count time constant; large for multi-channel coordinated deceptions"
+      T_0: "Time constant; years for multi-year coordinated deceptions"
+    type: recovery_dynamics
+    references_in_framework: ["§4.5"]
+    boundary_conditions:
+      at_N_zero_T_zero: "Phi_global = Phi_initial (suppressed)"
+      at_N_or_T_large: "Phi_global -> Phi_baseline (asymptotic recovery)"
+
+  - id: Eq17
+    name: "Allostatic Budget Conservation"
+    formula: "sum_{d in dyads} of [Cost_d(T_d) - Extraction_d(T_d)] <= B_alloc"
+    description: |
+      Subject's total allostatic budget is conserved across dyads. Per-dyad maintenance
+      costs and extraction values balance against total budget B_alloc.
+    target_costs:
+      C_mode: "Cost_d > 0 (positive maintenance cost)"
+      S_mode: "Cost_d > 0 (verification engineering cost)"
+      R_mode: "Cost_d > 0 (regulatory load absorbed)"
+      T_trib: "Cost_d > 0 (self-extracting devotion cost)"
+      W_mode: "Cost_d minimal"
+      E_mode: "Extraction_d > 0 (net positive value extracted)"
+    type: conservation_law
+    references_in_framework: ["§4.6"]
+    implication: "Cross-dyad subsidization: high-cost C-or-S in some dyads correlates with E-mode in others to balance budget"
+
+  - id: Eq18
+    name: "Observer Contamination Gate"
+    formula: "omega_k(Omega) = 1 if observer experienced spontaneous joy during t_k, else 0"
+    description: |
+      Per-observation gate determining whether observation k is admitted to evidence base.
+      Contaminated observations are zeroed (not downweighted).
+    type: gate_function
+    references_in_framework: ["§5.2 Protocol B"]
+
+  - id: Eq19
+    name: "Bayesian Posterior over Classification Triple"
+    formula: "P(A, T, Sk | F_1, ..., F_K) = [Product_k P(F_k | A, T, Sk)] * P(A, T, Sk) / Z"
+    normalization: "Z = sum over (A', T', Sk') of [Product_k P(F_k | A', T', Sk')] * P(A', T', Sk')"
+    description: |
+      Posterior probability over (Architecture, Target, Stake) tuple given filter readings.
+      Conditional independence assumption holds approximately when filters probe distinct
+      perturbation axes.
+    type: inference_rule
+    references_in_framework: ["§3.7"]
+    implementation_notes:
+      conditional_independence: "Assumes filters independent given (A,T,Sk); approximate but useful"
+      filter_dependence_correction: "For correlated filters (e.g., F1 and F4 both load on utility), use joint likelihood P(F_1, F_4 | A, T, Sk) directly or merge into composite"
+
+  - id: Eq20
+    name: "Architecture Decision Rule"
+    formula: "A_hat = argmax_A P(A | data); ship A_hat iff P(A_hat | data) / P(A_2nd | data) > rho_threshold"
+    description: |
+      Categorical classification rule with Bayes-factor threshold. Different rho thresholds
+      for different confidence levels.
+    rho_thresholds:
+      preliminary: 3
+      standard: 10
+      high_confidence: 30
+    type: decision_rule
+    references_in_framework: ["§3.7"]
+
+  - id: Eq21
+    name: "Closed-Loop Posterior Dynamics"
+    formula: "q(t + dt) = q(t) + eta * [observation(r(g(q(t)))) - prediction(q(t))]"
+    description: |
+      Dynamics of observer's posterior probability q under closed-loop classification.
+      g(q) is the access-grant function; r(g) is subject's response under access level g;
+      eta is the observer's update rate.
+    fixed_points:
+      committed: "q* = 1 (genuine S-mode resolves to commitment)"
+      rejected: "q* = 0 (E-mode-with-cover triggers extraction; observer back-updates)"
+    failure_modes:
+      premature_access_grant: "g(q) too aggressive at low q -> E-mode extracts before bracket converges"
+      update_rate_too_low: "eta too small -> CDS subsidization can fund continued cover during convergence"
+      update_rate_too_high: "eta too large -> single-event noise dominates, oscillation"
+    type: dynamical_system
+    references_in_framework: ["§4.7"]
+
+  - id: EqSk
+    name: "Stake Operationalization"
+    formula: "Sk(d) = alpha * arch_fraction(s, d) + (1 - alpha) * (1 - replaceability(d))"
+    description: |
+      Operational definition of Stake combining architecture-allocation and irreplaceability.
+      Both axes required for high-Stake; either alone is insufficient.
+    components:
+      arch_fraction: "Cost_d / sum_{d'} Cost_d' (dyad's share of subject's allostatic expenditure)"
+      replaceability: "min over d' != d of distance(d, d') (cost of substituting another dyad for same function)"
+      alpha: "Default 0.5; operator-tunable based on which axis dominates the case"
+    thresholds:
+      high_stake: "Sk > 0.7 (requires both architecture-allocation AND structural irreplaceability)"
+      moderate_stake: "0.4 <= Sk <= 0.7"
+      low_stake: "Sk < 0.4"
+    type: operational_definition
+    references_in_framework: ["§2.3"]
+
+# === Equation dependencies (for reference implementations) ===
+dependencies:
+  - {equation: Eq14, depends_on: [Eq13]}  # curvature uses composite
+  - {equation: Eq19, depends_on: [Eq1]}   # posterior uses filter readings
+  - {equation: Eq20, depends_on: [Eq19]}  # decision uses posterior
+  - {equation: Eq21, depends_on: [Eq19, Eq20]}  # closed-loop uses posterior + decision
+  - {equation: Eq16, depends_on: []}      # standalone recovery dynamics
+  - {equation: Eq17, depends_on: []}      # standalone budget conservation
+  - {equation: EqSk, depends_on: [Eq17]}  # Stake uses cost-allocation

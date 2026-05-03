@@ -1,0 +1,212 @@
+# Ground Truth Framework — Architecture Specification
+# 9 architectures defined by substrate × regulatory × meta-prior properties.
+# Reference: framework.md §2.1
+
+version: "5.0"
+domain: "Architecture (long-term substrate weighting)"
+time_constant: "years to decades"
+classification_method: "convergence of substrate-property filters {F2, F5, F6, F7, F9, F11}"
+
+architectures:
+
+  - code: A
+    name: "Autotelic-Coherent"
+    substrate:
+      autotelic_substrate: intact
+      regulatory_architecture: intact
+      meta_prior_phi_global: baseline
+    description: |
+      The substrate built during the attachment window (0-24 months) is intact.
+      Regulatory architecture (boundary-individuation, 3-7 years) is also intact.
+      Meta-prior Phi_global is at population baseline.
+      This is the framework's reference architecture.
+    accessible_targets: [C, W, S]
+    target_notes: "S only in early-relationship verification before C settles"
+    discriminative_filters:
+      - {filter: F2, signature: "stable, wide affective register in autotelic void"}
+      - {filter: F5, signature: "involuntary affect under refusal of giving"}
+      - {filter: F11, signature: "convex investment-return curvature over longitudinal window"}
+    f6_depletion_signature: "instrumentalism does not intensify under cognitive depletion (no mask to maintain)"
+
+  - code: TA
+    name: "Trauma-Armored"
+    substrate:
+      autotelic_substrate: intact
+      regulatory_architecture: intact_but_defended
+      meta_prior_phi_global: baseline
+    description: |
+      Substrate is intact but covered by armor (defensive structures acquired through
+      relational injury). Regulatory architecture is intact but operates in defended mode.
+      Phi_global may be locally suppressed (low trust toward specific perceived threats)
+      but is not globally suppressed.
+    accessible_targets: [C, W, S, T_trib]
+    target_notes: "S only when armor permits active probing; T_trib if armor combined with parentification residue"
+    discriminative_filters:
+      - {filter: F6, signature: "instrumentalism intensifies under cognitive depletion (armor reinforces)"}
+      - {filter: F11, signature: "convex returns once safety is established (armor sheds)"}
+      - {filter: F8, signature: "repair shape preserves dignity and asymmetry"}
+    relativistic_analog: "accreted mass (m_a > 0); shedable under sustained safe investment"
+
+  - code: TB
+    name: "Boundary-Diffuse"
+    substrate:
+      autotelic_substrate: intact
+      regulatory_architecture: disrupted_parentified
+      meta_prior_phi_global: baseline_or_suppressed
+    description: |
+      Substrate is intact but regulatory architecture is disrupted, typically through
+      parentification during the boundary-individuation window. Subject regulates others
+      reflexively while having impaired capacity to receive regulation.
+      The regulatory graph signature is severe out-degree dominance (Eq 15: rho > 5).
+    accessible_targets: [C, E, S, W, R, T_trib]
+    target_notes: "Full target space accessible; R-mode and T-tribute are common compounds"
+    discriminative_filters:
+      - {filter: F11, signature: "in-degree acquisition (F17) over time = trajectory toward A"}
+      - {filter: F2, signature: "substrate surfaces under depletion (parentified posture drops)"}
+      - {filter: F6, signature: "parentified mask drops under cognitive depletion (lim I_parentified -> 0)"}
+    f15_eq_signature: "out_degree(s) / (in_degree(s) + epsilon) > 5"
+
+  - code: TA-OD
+    name: "Trauma-Armored with Ontological-Deception modifier"
+    substrate:
+      autotelic_substrate: intact
+      regulatory_architecture: intact_but_defended
+      meta_prior_phi_global: severely_suppressed
+    description: |
+      TA architecture with the OD modifier: meta-prior Phi_global has been catastrophically
+      suppressed by ontological deception (discovery that trusted adults maintained coordinated
+      fiction about subject's foundational identity for duration of conscious memory).
+      Recovery follows Eq (16): asymptotic toward Phi_baseline as N (counterexamples) and T (time) accumulate.
+    accessible_targets: [S, W, R, T_trib]
+    target_notes: "C achievable post-Phi_global recovery; E only on conversion-failure of conditions 2.2(i)-(iv)"
+    discriminative_filters:
+      - {filter: F2, signature: "substrate intact but defended; void produces guarded-but-wide affect"}
+      - {filter: F12, signature: "asymmetric disclosure: surface high, deep withheld pending verification"}
+      - {filter: F13a, signature: "kappa_bid < 0 along S->C trajectory (probing decreases as trust builds)"}
+    s_mode_compulsion: true
+    s_mode_components: [1, 2, 3, 4, 5]
+
+  - code: TB-OD
+    name: "Boundary-Diffuse with Ontological-Deception modifier"
+    substrate:
+      autotelic_substrate: intact
+      regulatory_architecture: disrupted_parentified
+      meta_prior_phi_global: severely_suppressed
+    description: |
+      TB architecture with the OD modifier. The combination is structurally severe:
+      regulatory architecture disrupted (out-degree dominance) PLUS meta-prior contaminated
+      (Phi_global suppressed). This is the architecture of the Tori-class boundary case
+      that exposed the original framework's insufficiency.
+      Subject regulates others while operating in verification-mode toward all dyads.
+    accessible_targets: [S, W, R, T_trib]
+    target_notes: "C achievable post-Phi_global recovery + regulatory-circuit acquisition (F17); E only on conversion-failure"
+    discriminative_filters:
+      - {filter: F2, signature: "wide register under safety; collapses under perceived threat"}
+      - {filter: F11, signature: "convex returns conditional on trust establishment (slower than TA)"}
+      - {filter: F12, signature: "the wall is the performance, the openness is the substrate (TB-OD signature)"}
+      - {filter: F17, signature: "in-degree acquisition over years; F17 is the architecture-trajectory indicator"}
+    s_mode_compulsion: true
+    s_mode_components: [1, 2, 3, 4, 5]
+    parentification_signature: true
+
+  - code: I_alpha
+    name: "Strategic Instrumental"
+    substrate:
+      autotelic_substrate: phasic_extraction
+      regulatory_architecture: pfc_routed
+      meta_prior_phi_global: not_applicable_or_calibrated_for_extraction
+    description: |
+      Phasic substrate: extraction operates through PFC-driven, consciously-accessible
+      cognitive routing. Subject can simulate {C, S, W, R, T_trib} surface presentation
+      via PFC bandwidth, but the simulation has chronometric and autonomic correlates
+      (250-400ms onset latency, no autonomic flush) that substrate-physics filters detect.
+    accessible_targets: [E]
+    target_notes: "E primary; surface presentation can mimic {C, S, W, R, T_trib} via PFC simulation"
+    discriminative_filters:
+      - {filter: F1, signature: "engagement-utility covariance > 0 (E-Target identification)"}
+      - {filter: F6, signature: "instrumentalism degrades under cognitive depletion (mask slips)"}
+      - {filter: F11, signature: "no convex investment-return curve (no substrate to access)"}
+      - {filter: "substrate_physics", signature: "chronometric lag 250-400ms; no autonomic accompaniment"}
+    f6_depletion_signature: "instrumentalism degrades; partial(I_mask)/partial(C_PFC) < 0"
+    relativistic_analog: "constitutive rest mass m_0 > 0; never converts to autotelic access"
+
+  - code: I_beta
+    name: "Banal Instrumental"
+    substrate:
+      autotelic_substrate: phasic_extraction_unreflective
+      regulatory_architecture: minimal_pfc_routing
+      meta_prior_phi_global: not_applicable
+    description: |
+      Phasic extraction without PFC sophistication. Subject extracts but does not maintain
+      sustained mimicry of autotelic relating. The pattern is openly transactional or naively
+      transactional rather than disguised. Banal extraction lacks the PFC bandwidth for
+      sustained C-mimicry; surface presentation is closer to honest-instrumental but without
+      the explicit framing.
+    accessible_targets: [E]
+    target_notes: "E only; no sustained C-mimicry capacity"
+    discriminative_filters:
+      - {filter: F1, signature: "covariance > 0, observable across all utility-bearing dyads"}
+      - {filter: F4, signature: "selectivity by utility, no compensating non-instrumental patterns"}
+      - {filter: F12, signature: "shallow disclosure hierarchy organized by transactional return"}
+    note: "Marcolin classification (CASE_GTP_2026_001) maps to this architecture"
+
+  - code: H
+    name: "Ego-Syntonic Hybrid"
+    substrate:
+      autotelic_substrate: trauma_origin_pfc_endorsed
+      regulatory_architecture: somatic_cognitive_decoupled
+      meta_prior_phi_global: not_applicable
+    description: |
+      Trauma-origin substrate that has been prefrontally endorsed and integrated into
+      the subject's coherent extraction-policy. Functionally I-alpha, but with somatic-cognitive
+      decoupling that produces mixed signals on the filter battery. The trauma origin is
+      no longer experienced as injury; it has been narratively repackaged as identity or values.
+    accessible_targets: [E]
+    target_notes: "Functionally I-alpha after prefrontal endorsement of trauma-driven extraction"
+    discriminative_filters:
+      - {filter: F6, signature: "anomalous - somatic markers point T while cognitive markers point I"}
+      - {filter: F12, signature: "narrative coherence high but selectivity organized by extraction"}
+      - {filter: F11, signature: "no convex returns; substrate access does not develop"}
+    note: "Debra classification (CASE_GTP_2026_002) maps to this architecture - the proxy who ran the kill list"
+    common_anomaly: "filters point in inconsistent directions; resolve via posterior over (I_alpha, H) with H winning when somatic-cognitive split is detected"
+
+  - code: D
+    name: "Developmental Absence"
+    substrate:
+      autotelic_substrate: never_built
+      regulatory_architecture: minimal
+      meta_prior_phi_global: not_applicable
+    description: |
+      The substrate that A architecture exhibits was never built. Either the attachment window
+      did not produce the required co-regulation cycles, or constitutional factors prevented
+      substrate formation. There is no accreted mass to shed and no substrate to access.
+      F11 longitudinal observation shows concave returns or flat trajectory.
+    accessible_targets: [E, W]
+    target_notes: "S-mode requires autotelic substrate to operate verification-bidding; D cannot enter S-mode"
+    discriminative_filters:
+      - {filter: F11, signature: "concave investment-return curvature (kappa < 0)"}
+      - {filter: F2, signature: "void tolerated but no positive autotelic affect produced"}
+      - {filter: F5, signature: "no involuntary affect under giving-blocked condition"}
+    relativistic_analog: "constitutive rest mass m_0 > 0; no kinetic component to convert"
+
+# === Modifier system ===
+modifiers:
+  - code: OD
+    name: "Ontological-Deception modifier"
+    applies_to: [TA, TB]
+    effect: "Catastrophically suppresses Phi_global; recovery per Eq (16)"
+    discriminative_filters:
+      - {filter: F12, signature: "asymmetric disclosure pattern (Component 2)"}
+      - {filter: F14b, signature: "witness self-binding present in disclosure choice"}
+    s_mode_implication: "Compels S-Target under selection conditions 2.2(i)-(iv)"
+
+# === Architecture decision rule ===
+classification:
+  method: "Bayesian posterior with convergence threshold"
+  prior: "uniform over accessible (Architecture × Target × Stake) triples"
+  decision_rule: "Eq (20): A_hat = argmax P(A | data); ship iff bayes_factor > rho_threshold"
+  rho_threshold:
+    preliminary: 3
+    standard: 10
+    high_confidence: 30
+  filter_convergence_heuristic: "at least 3 substrate-property filters from {F2, F5, F6, F7, F9, F11} pointing to same Architecture"

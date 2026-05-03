@@ -1,0 +1,125 @@
+# Test Case 01: Autotelic-Coherent / Committed-Autotelic
+# A clean, unambiguous case of genuine connection.
+# Reference: framework.md (synthetic case, no privacy concern)
+
+case_id: "GTPv5-TEST-01"
+title: "A x C: Genuine connection, autotelic-coherent architecture"
+case_type: "synthetic"
+expected_classification:
+  architecture: "A"
+  target: "C"
+  stake: "moderate"
+  confidence: "high_confidence"
+
+scenario: |
+  Subject S and observer O have known each other for two years through a creative
+  community. The relationship has progressed naturally from acquaintance to deep
+  friendship without instrumental driver. Both are professionally established with
+  no overlapping career utility.
+
+setup:
+  duration_months: 18
+  cross_dyad_breadth: 4  # Protocol F satisfied
+  observer_joy_capability_rate: 0.85  # well above 0.3 threshold
+  stake:
+    arch_fraction: 0.3
+    replaceability: 0.6
+    alpha: 0.5
+    expected_value: 0.35  # moderate
+
+filter_readings:
+  - filter: F1
+    level: weak_against
+    timestamp: 4.0
+    notes: "When O has low-utility period (vacation, no professional updates), S engagement does not change; S messages with personal content rather than work content"
+
+  - filter: F1
+    level: weak_against
+    timestamp: 9.0
+    notes: "Same pattern observed across several utility-perturbation events"
+
+  - filter: F2
+    level: strong_for
+    timestamp: 5.0
+    notes: "Long unstructured walk; S calm, present, conversation flows freely without agenda; no phone-checking, no redirection"
+
+  - filter: F2
+    level: strong_for
+    timestamp: 12.0
+    notes: "Quiet evening on porch; both comfortable in extended silences"
+
+  - filter: F3
+    level: strong_for
+    timestamp: 7.0
+    notes: "After deep conversation, S references it weeks later with continued warmth; nervous-system after-effects clearly persistent"
+
+  - filter: F4
+    level: anti_utility_organization
+    timestamp: 10.0
+    notes: "S's close relationships skew toward utility-neutral; close friends include people who provide nothing instrumental"
+
+  - filter: F5
+    level: brief_disappointment_then_acceptance
+    timestamp: 3.0
+    notes: "When S offered help and O politely declined, brief involuntary disappointment followed by warm acceptance; no repeat offer"
+
+  - filter: F6
+    level: neutral
+    timestamp: 8.0
+    notes: "During flu, S behavior unchanged from baseline; warmth and presence stable under cognitive depletion"
+
+  - filter: F7
+    level: strong_for
+    timestamp: 14.0
+    notes: "Six months later, S recalls O's outfit, the cafe ambiance, what O ordered, O's affective state during the conversation; agenda details hazier"
+
+  - filter: F8
+    level: mutual_dignified_resolution
+    timestamp: 6.0
+    notes: "After miscommunication, repair preserved both parties' dignity; resolution genuine; effort proportional"
+
+  - filter: F9
+    level: breadth_dominant
+    timestamp: 11.0
+    notes: "S knows O's family member names, O's preferences, O's fears about creative work; breadth across personal life"
+
+  - filter: F10
+    level: autotelic_appreciation
+    timestamp: 4.5
+    notes: "Logistical mishap led to extra unstructured time together; S visibly enjoyed the bonus"
+
+  - filter: F11
+    level: convex_strong
+    timestamp: 18.0
+    notes: "Over 18 months of safe investment, A(tau) shows clear convex pattern; substrate access deepening over time"
+
+  - filter: F12
+    level: progressive_to_load_bearing
+    timestamp: 13.0
+    notes: "Disclosure has progressed through stages: safety -> play -> trust -> received regulation; load-bearing material now exchanged"
+
+  - filter: SP1
+    level: sub_100ms
+    timestamp: 6.5
+    notes: "During emotional pivot, S's facial response onset visibly < 100ms; subcortical pathway"
+
+  - filter: SP2
+    level: both_present
+    timestamp: 9.5
+    notes: "Genuine emotional moment: capillary flush at neck visible alongside facial expression; full autonomic accompaniment"
+
+  - filter: SP3
+    level: hour_scale_persistence
+    timestamp: 7.5
+    notes: "After vulnerable disclosure, affective tone persisted into next 60-90 minutes; not topic-shift dissipated"
+
+# === Expected classifier output ===
+expected_posterior_signals:
+  - "Architecture posterior dominated by A (>0.6)"
+  - "Target posterior dominated by C (>0.7)"
+  - "Bayes factor (best vs second-best) > 30 (high_confidence threshold)"
+
+expected_recommended_action: |
+  Per Protocol D: Apply autotelic governance. Patience, grace, no ledger.
+  Per Protocol C: Decommission matrix; classification stable at high confidence.
+  Continue presence; the relationship is what it appears to be.

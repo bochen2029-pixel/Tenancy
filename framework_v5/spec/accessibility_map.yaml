@@ -1,0 +1,163 @@
+# Ground Truth Framework — Architecture × Target Accessibility Map
+# Defines which (Architecture, Target) combinations are structurally accessible.
+# Reference: framework.md §2.4
+
+version: "5.0"
+purpose: |
+  Not all (Architecture × Target) tuples are accessible. The accessibility map specifies
+  impossible combinations and conditional combinations. Without this map, the three-axis
+  classification permits incoherent classifications. With it, classifications respect
+  substrate-physics constraints.
+
+# Boolean accessibility: true = accessible, false = forbidden
+# Conditional: requires_condition = true with condition spec
+# Notation: 1 = primary/accessible, 0 = forbidden, c = conditional
+
+map:
+  A:
+    C: 1
+    E: 0  # A-architecture cannot operate E-Target; substrate prevents
+    S: c  # only in early-relationship verification
+    W: 1
+    R: 0  # A-architecture's regulatory architecture is intact, no need for R
+    T_trib: 0  # A-architecture has self in value-set; no T_trib
+
+  TA:
+    C: 1  # post-armor-reduction
+    E: 0  # TA substrate intact; structurally cannot operate E
+    S: c  # only when armor permits active probing
+    W: 1
+    R: 0  # TA regulatory architecture intact (defended), no R-need
+    T_trib: c  # rare; requires armor combined with parentification residue
+
+  TB:
+    C: 1  # post-F17 in-degree acquisition
+    E: 1  # accessible when regulatory disruption combines with utility availability
+    S: 1
+    W: 1
+    R: 1  # primary - parentification produces R-mode in adult relationships
+    T_trib: 1  # common - parentification produces T_trib as adult adaptation
+
+  TA-OD:
+    C: c  # achievable post Phi_global recovery (Eq 16)
+    E: c  # only on conversion-failure of conditions 2.2(i)-(iv)
+    S: 1  # primary; compelled under selection conditions
+    W: 1
+    R: 1  # accessible when armor combines with regulatory dependency
+    T_trib: c  # when ontological-deception combines with self-extracting devotion
+
+  TB-OD:
+    C: c  # achievable post Phi_global recovery + F17 in-degree acquisition
+    E: c  # only on conversion-failure
+    S: 1  # primary; compelled under selection conditions
+    W: 1
+    R: 1  # accessible when ontological-deception combines with regulatory dependency
+    T_trib: 1  # common in severe TB-OD with religious-devotional or filial-piety architectures
+
+  I_alpha:
+    C: 0  # primary E; surface presentation can MIMIC C via PFC, not be C
+    E: 1  # primary
+    S: 0  # primary E; surface presentation can mimic S via PFC, not be S
+    W: 0  # primary E; surface mimicry possible
+    R: 0  # primary E; surface mimicry possible
+    T_trib: 0  # primary E; surface mimicry possible
+    note: "I_alpha can SIMULATE any Target via PFC, but operative target is always E. Detection via substrate-physics (chronometric, autonomic) and longitudinal F11."
+
+  I_beta:
+    C: 0  # banal extraction lacks PFC sophistication for C-mimicry
+    E: 1  # primary, only target
+    S: 0  # cannot sustain S-mimicry
+    W: 0  # cannot sustain W-mimicry (banal extraction is not framed honestly)
+    R: 0
+    T_trib: 0
+
+  H:
+    C: 0  # functionally I_alpha after prefrontal endorsement
+    E: 1  # primary
+    S: 0  # cannot operate true S; can simulate
+    W: 0
+    R: 0
+    T_trib: 0
+    note: "H exhibits anomalous filter patterns due to somatic-cognitive decoupling but operative target is E"
+
+  D:
+    C: 0  # S-mode requires autotelic substrate; D has none
+    E: 1  # accessible alongside W
+    S: 0  # forbidden - S requires autotelic substrate to operate verification-bidding
+    W: 1  # accessible alongside E
+    R: 0  # D has no regulatory architecture to subcontract
+    T_trib: 0  # D cannot operate T_trib (requires autotelic devotion capacity)
+
+# === Forbidden tuples (explicit) ===
+# These combinations are structurally impossible and should zero the joint posterior
+forbidden_tuples:
+  - [A, E]  # A-architecture cannot operate extractive target
+  - [A, R]  # A-architecture has no regulatory subcontracting need
+  - [A, T_trib]  # A includes self in value-set
+  - [TA, E]  # TA substrate intact; cannot operate true E
+  - [TA, R]  # TA regulatory architecture intact
+  - [I_beta, C]  # banal extraction cannot mimic C
+  - [I_beta, S]
+  - [I_beta, W]  # I_beta is not honestly transactional; that would be a different architecture
+  - [I_beta, R]
+  - [I_beta, T_trib]
+  - [H, C]
+  - [H, S]
+  - [H, W]
+  - [H, R]
+  - [H, T_trib]
+  - [D, C]
+  - [D, S]
+  - [D, R]
+  - [D, T_trib]
+
+# === Conditional tuples ===
+# These are accessible only under specific conditions
+conditional_tuples:
+  - architecture: A
+    target: S
+    condition: "early-relationship verification only; once C settles, S exits"
+
+  - architecture: TA
+    target: S
+    condition: "armor must permit active probing; defensive closure suppresses S"
+
+  - architecture: TA
+    target: T_trib
+    condition: "rare; requires armor combined with parentification residue"
+
+  - architecture: TA-OD
+    target: C
+    condition: "achievable post Phi_global recovery per Eq 16"
+
+  - architecture: TA-OD
+    target: E
+    condition: "only on conversion-failure of selection conditions 2.2(i)-(iv)"
+
+  - architecture: TA-OD
+    target: T_trib
+    condition: "when ontological-deception combines with self-extracting devotion architecture"
+
+  - architecture: TB-OD
+    target: C
+    condition: "achievable post Phi_global recovery (Eq 16) AND F17 in-degree acquisition"
+
+  - architecture: TB-OD
+    target: E
+    condition: "only on conversion-failure of selection conditions 2.2(i)-(iv)"
+
+# === I_alpha simulation note ===
+# I_alpha can produce surface presentation that MIMICS {C, S, W, R, T_trib} via PFC
+# but the operative target remains E. The mimicry is detectable via:
+i_alpha_simulation_detection:
+  primary:
+    - "F6 cognitive entropy: instrumentalism degrades under depletion (mask slips)"
+    - "F11 longitudinal: no convex investment-return curve"
+    - "Substrate-physics: chronometric lag 250-400ms; no autonomic flush"
+  secondary:
+    - "F12 disclosure hierarchy: depth plateaus at recruitment-level"
+    - "F4 cross-relationship selectivity: utility-organized despite surface variance"
+  note: |
+    The Gaming Cost Theorem (Eq 9) establishes that sustained simulation across d>=5 axes
+    has cost C_total ~ 2^d, which exceeds C_auth = O(1). I_alpha can simulate well across
+    1-3 filters but degrades exponentially as the framework's effective d grows past 5.

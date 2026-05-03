@@ -1,0 +1,152 @@
+# Ground Truth Framework — Thresholds and Decision Parameters
+# All numerical thresholds, decision parameters, and operating constants.
+# Reference: framework.md throughout
+
+version: "5.0"
+purpose: "Centralized specification of all decision thresholds. Operators may tune these for specific contexts but the defaults represent the framework's calibrated operating regime."
+
+bayesian:
+  rho_threshold:
+    preliminary: 3
+    description_preliminary: "Suggestive evidence; provisional classification suitable for low-Stake decisions"
+    standard: 10
+    description_standard: "Robust evidence; classification suitable for moderate-Stake decisions"
+    high_confidence: 30
+    description_high_confidence: "Very strong evidence; classification suitable for high-Stake decisions"
+    rationale: "Bayes factor > rho means posterior odds heavily favor classification; thresholds calibrated to minimize false-classification rate at given Stake level"
+
+  prior:
+    default: uniform_over_accessible_triples
+    description: "Default prior is uniform over (A, T, Sk) triples that pass accessibility map. Inaccessible triples (e.g., A x E) have zero prior."
+    operator_tunable: true
+    note: "Operators with population-base-rate information should set prior accordingly"
+
+  conditional_independence:
+    assumed: true
+    note: "Eq 19 assumes filter readings are conditionally independent given (A, T, Sk). This is approximate; correlated filters should be merged or use joint likelihood."
+
+curvature_discriminant:
+  kappa_noise_floor:
+    formula: "kappa_noise = var(sigma_composite) / window_length^2"
+    description: "Below this threshold, second-derivative signal is not distinguishable from measurement noise"
+    typical_values:
+      9_month_window: "kappa_noise ~ 0.01 - 0.05 (rough operating range)"
+      24_month_window: "kappa_noise ~ 0.001 - 0.005"
+      36_month_window: "kappa_noise ~ 0.0005 - 0.002"
+    operator_action_if_below_threshold: "extend observation window OR accept insufficient signal"
+
+parentification:
+  rho_thresholds:
+    flag: 5.0
+    strong: 10.0
+    severe: 20.0
+  baseline_population_range: [0.5, 3.0]
+  description: "out_degree(s) / (in_degree(s) + epsilon) ratios; epsilon = 0.1 default to prevent division by zero"
+
+phi_global:
+  baseline_range: [0.7, 0.9]
+  initial_post_T_OD: 0.05
+  recovery_constants:
+    typical_T_OD_16_year_coordinated:
+      N_0: 50  # number of independent counterexamples needed for substantial recovery
+      T_0: 5   # years
+    moderate_T_OD:
+      N_0: 20
+      T_0: 2
+    mild_T_OD:
+      N_0: 10
+      T_0: 1
+
+protocol_C_windows:
+  initial_classification_max_months: 9
+  f11_longitudinal_extension_max_months: 36
+  case_T_only_extension: true
+  post_classification_observation_window: 0
+  rationale: "Bounded windows prevent diagnostic from converting into relational pathology"
+
+protocol_F_cross_dyad:
+  minimum_observable_dyads: 3
+  required_for_cases:
+    - "suspected cross-dyad subsidization"
+    - "suspected R-mode (regulatory subcontracting)"
+    - "sophisticated suspected E-mode-with-cover"
+  single_dyad_observer_action: "Explicitly bound classifications by acknowledging which cross-dyad signatures cannot be detected"
+
+protocol_G_CPT:
+  activation_minimum_observation_window_months: 12
+  preferred_minimum_observation_window_months: 24
+  warnings:
+    - "Violates Axiom 3 passive-measurement principle"
+    - "Consumes observer-side credibility"
+    - "Last-resort discriminator only"
+  response_thresholds:
+    f2_relief_window_hours: [24, 72]
+    f10_spike_window_hours: [0, 48]
+    equivocal_extension_months: [3, 6]
+
+closed_loop_dynamics:
+  eta_update_rate:
+    default: 0.1
+    description: "Per-observation Bayesian update rate; lower = slower convergence but more robust to noise"
+  access_grant_function_calibration:
+    minimum_q_for_high_stake_access: 0.7
+    description: "Do not grant high-Stake access at posterior probability below this threshold"
+    rationale: "Premature access-grant allows E-mode-with-cover to extract before bracket converges"
+  oscillation_detection:
+    threshold: "If |q(t+dt) - q(t)| > 0.3 sustained over 3+ updates, eta is too large"
+    action: "Reduce eta by factor of 2; smooth observation window"
+
+stake_operationalization:
+  alpha_default: 0.5
+  description: "Stake = alpha * arch_fraction + (1 - alpha) * (1 - replaceability)"
+  thresholds:
+    high_stake: 0.7
+    moderate_stake: [0.4, 0.7]
+    low_stake_max: 0.4
+
+gaming_cost_theorem:
+  effective_independence_dimension_d:
+    typical_regime: [1, 4]
+    framework_filter_battery: [6, 8]
+    sophisticated_extractor_capability: [3, 5]
+    high_sophistication_regime_collapse: 6
+    description: "At d >= 5, gaming cost C_total ~ 2^d exceeds being-real cost C_auth = O(1). Above d = 6, framework collapses S/E under Axiom 2."
+
+substrate_physics_thresholds:
+  chronometric_lag_ms:
+    genuine_subcortical: [50, 100]
+    pfc_routed_simulation: [250, 400]
+    discrimination_threshold_ms: 175  # midpoint
+  cortisol_response_minutes:
+    genuine_vulnerability_half_life: [60, 90]
+    simulated_dissipation_seconds: [1, 30]
+  autonomic_voluntary_split:
+    genuine_signature_required:
+      - "capillary_flush_observed"
+      - "pupil_dilation_observed"
+      - "breath_pattern_shift_observed"
+    simulated_signature: "facial_expression_only"
+
+# === Operator self-audit thresholds ===
+operator_self_audit:
+  framework_dependency_warning:
+    threshold_months_post_classification: 1
+    description: "If operator continues to invoke matrix more than 1 month post-classification, matrix may be functioning as armor"
+  joy_capability_minimum_per_observation_window:
+    threshold: 0.3
+    description: "If less than 30% of interactions feature operator-joy-capable observation, operator is too analytical; framework outputs are contaminated"
+
+# === Calibration tuning ===
+calibration_tuning:
+  ordinal_likelihood_ratios:
+    strong_for: 5.0
+    weak_for: 2.0
+    neutral: 1.0
+    weak_against: 0.5
+    strong_against: 0.2
+    description: "Default ordinal likelihood ratios when empirical calibration unavailable"
+  filter_reliability_default:
+    high_reliability_filters: [F2, F11, F17, SP1, SP2, SP3]
+    moderate_reliability: [F1, F3, F6, F8, F12]
+    lower_reliability: [F4, F5, F7, F9, F10, F13a, F13b, F14a, F14b, F15a, F15b, F16]
+    description: "Reliability classifications for Fisher-information weighting in composite signals"

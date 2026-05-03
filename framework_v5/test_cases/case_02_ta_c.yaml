@@ -1,0 +1,153 @@
+# Test Case 02: Trauma-Armored / Committed-Autotelic
+# A case where armor reduces over time and substrate accesses; F11 convex curvature.
+# Reference: framework.md (synthetic case)
+
+case_id: "GTPv5-TEST-02"
+title: "TA x C: Trauma-armored accessing committed connection"
+case_type: "synthetic"
+expected_classification:
+  architecture: "TA"
+  target: "C"
+  stake: "high"
+  confidence: "high_confidence"
+
+scenario: |
+  Subject S has TA architecture - intact substrate covered by armor from earlier
+  relational injury. Observer O has been steadily, safely present for 24 months
+  without instrumental driver. Initial months showed guarded engagement; months
+  18-24 show armor reduction and substrate access deepening. F11 convex pattern
+  emerges over the longitudinal window.
+
+setup:
+  duration_months: 24
+  cross_dyad_breadth: 3
+  observer_joy_capability_rate: 0.75
+  stake:
+    arch_fraction: 0.5
+    replaceability: 0.8
+    alpha: 0.5
+    expected_value: 0.35  # arch fraction high, replaceability also high (low irreplaceability) -> moderate
+
+filter_readings:
+  - filter: F1
+    level: weak_against
+    timestamp: 6.0
+    notes: "Engagement does not track utility; S engagement stable across utility perturbations"
+
+  - filter: F2
+    level: narrow_register_present
+    timestamp: 4.0
+    notes: "Early in observation: narrow affective register but present; tolerates void without restlessness; armor signature"
+
+  - filter: F2
+    level: wide_register_calm
+    timestamp: 20.0
+    notes: "Late in observation: wide register has emerged; armor reduced; substrate accessing"
+
+  - filter: F3
+    level: moderate_decay
+    timestamp: 10.0
+    notes: "Connection signatures persist 3-7 days; characteristic of TA where armor permits but does not extend the after-effect duration of A"
+
+  - filter: F3
+    level: slow_decay
+    timestamp: 22.0
+    notes: "Late: connection signatures persist 7-14 days; substrate access deepening"
+
+  - filter: F4
+    level: anti_utility_organization
+    timestamp: 12.0
+    notes: "S's close relationships utility-neutral or anti-correlated"
+
+  - filter: F5
+    level: brief_disappointment_then_acceptance
+    timestamp: 8.0
+    notes: "Refusal Response: brief involuntary affect, warm acceptance; substrate signature"
+
+  - filter: F6
+    level: strong_for
+    timestamp: 14.0
+    notes: "Under cognitive depletion, instrumentalism intensifies (TA armor reinforces); diagnostic for TA over TB"
+
+  - filter: F7
+    level: mixed_recall
+    timestamp: 9.0
+    notes: "Both atmospheric and agenda details preserved; not full breadth-dominant yet"
+
+  - filter: F7
+    level: atmospheric_dominant
+    timestamp: 21.0
+    notes: "Late: recall preserves atmosphere over agenda; substrate-engaged memory frame"
+
+  - filter: F8
+    level: mutual_dignified_resolution
+    timestamp: 11.0
+    notes: "Repair shape preserves dignity; characteristic of T-architecture with autotelic substrate"
+
+  - filter: F9
+    level: mixed
+    timestamp: 13.0
+    notes: "Personal details retention moderate; armor selectively protects against full breadth"
+
+  - filter: F9
+    level: breadth_dominant
+    timestamp: 23.0
+    notes: "Late: breadth has expanded; armor reducing"
+
+  - filter: F10
+    level: neutral_tolerance
+    timestamp: 7.0
+    notes: "Early: unproductive time tolerated without distress (not yet appreciation)"
+
+  - filter: F10
+    level: autotelic_appreciation
+    timestamp: 22.0
+    notes: "Late: unproductive time appreciated; armor-reduction signature"
+
+  - filter: F11
+    level: convex_strong
+    timestamp: 24.0
+    notes: |
+      F11 longitudinal: A(tau) trajectory clearly convex over 24 months.
+      Months 1-12: slow growth; months 13-18: acceleration; months 19-24: rapid deepening.
+      Curvature kappa >> kappa_noise positive. TA signature confirmed.
+
+  - filter: F12
+    level: progressive_to_load_bearing
+    timestamp: 18.0
+    notes: "Disclosure has progressed through stages; load-bearing material now reciprocally exchanged"
+
+  - filter: F17
+    level: acquiring_partially
+    timestamp: 22.0
+    notes: "Subject increasingly tolerates being held; in_degree increasing but with regression under stress (consistent with TA, not TB)"
+
+  - filter: SP1
+    level: sub_100ms
+    timestamp: 16.0
+    notes: "Genuine subcortical affect onset under safety conditions; substrate intact"
+
+  - filter: SP2
+    level: both_present
+    timestamp: 17.0
+    notes: "Autonomic accompaniment present alongside facial expression"
+
+  - filter: SP3
+    level: hour_scale_persistence
+    timestamp: 15.5
+    notes: "Vulnerable disclosure cortisol response observable over 60-90 minutes"
+
+# === Expected classifier output ===
+expected_posterior_signals:
+  - "Architecture posterior dominated by TA (>0.5)"
+  - "Target posterior dominated by C (>0.6)"
+  - "Bayes factor > 30 (high_confidence)"
+  - "F6 strong_for is the diagnostic distinguishing TA from TB"
+  - "F11 convex_strong over 24 months is the principal long-run discriminator"
+
+expected_recommended_action: |
+  Per Protocol D: Apply autotelic governance with awareness that armor history may
+  produce occasional defended responses requiring patience.
+  Per Protocol E: Differentiation completed; classification is TA (not TB) based on
+  F6 instrumentalism-intensifies-under-depletion signature.
+  Per Protocol C: Decommission matrix; classification is high-confidence and stable.
