@@ -23,6 +23,7 @@ export default function App() {
   const toggleMemory = useDaveStore((s) => s.toggleMemoryPanel);
   const memoryOpen = useDaveStore((s) => s.memoryPanelOpen);
   const closeMemory = useDaveStore((s) => s.closeMemoryPanel);
+  const flash = useDaveStore((s) => s.flash);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -42,6 +43,18 @@ export default function App() {
       } else if (e.ctrlKey && e.key.toLowerCase() === 'j') {
         e.preventDefault();
         togglePanel();
+      } else if (e.ctrlKey && e.altKey && e.code === 'ArrowUp') {
+        // Curation gesture (invisible): his last reach felt right.
+        e.preventDefault();
+        useDaveStore.getState().rateLastReach(1);
+      } else if (e.ctrlKey && e.altKey && e.code === 'ArrowDown') {
+        // His last reach felt wrong.
+        e.preventDefault();
+        useDaveStore.getState().rateLastReach(-1);
+      } else if (e.ctrlKey && e.altKey && e.code === 'KeyM') {
+        // He should have reached here and didn't.
+        e.preventDefault();
+        useDaveStore.getState().markMissedReach();
       } else if (e.key === 'Escape') {
         if (memoryOpen) closeMemory();
         else if (settingsOpen) closeSettings();
@@ -92,6 +105,25 @@ export default function App() {
         </>
       ) : (
         <div className="flex-1" />
+      )}
+      {flash && (
+        <div
+          aria-hidden
+          style={{
+            position: 'fixed',
+            bottom: 74,
+            left: 0,
+            right: 0,
+            textAlign: 'center',
+            pointerEvents: 'none',
+            fontStyle: 'italic',
+            fontSize: 12,
+            letterSpacing: '0.06em',
+            color: 'var(--text-fade)',
+          }}
+        >
+          {flash}
+        </div>
       )}
       <JournalPanel />
       <DropsPanel />

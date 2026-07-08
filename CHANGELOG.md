@@ -9,6 +9,37 @@ To roll back a change: `cp -r .snapshots/<timestamp>_<label>/* ./` then
 
 ---
 
+## 2026-07-08 — Hardening + curation surface (A9, persona-pin, PIY §4.7)
+
+Follow-on to the QC/packaging/polish work, acting on the A8 review + PIY roadmap.
+
+**A9 amendment.** Formally recorded the Settings admin panel as an accepted
+single-operator exception to §2/§11, with the standing requirement to
+`#[cfg]`-gate it out of release builds if Dave is ever distributed.
+
+**Persona-pin — prevents the root-cause bug from ever recurring.** New
+`persona_pinned` setting. `resolve_active_system_prompt` now honors a persisted
+`active_system_prompt` ONLY when it was explicitly pinned via the Settings panel
+(`set_system_prompt` sets the flag; `reset_system_prompt` clears it). A leftover
+experimental persona row that was never pinned is inert → Dave stays Dave. This
+closes the class of failure where a forgotten override silently replaced Dave on
+every inference path (the 2026-07-08 "boots as Katherine" root cause).
+
+**Curation surface (PIY §4.7 Phase 1 — the roadmap's top-leverage move).** The
+operator can now label Dave's SELF-INITIATED reaches with a single bit, turning
+the outreach logs into a Tier-1 (learned-initiation) training corpus:
+- New tables `reach_ratings` (keyed to the delivered reach message) and
+  `reach_counterfactuals` ("should have reached here and didn't").
+- Commands `rate_last_reach(conversation_id, rating)` / `mark_missed_reach`.
+- **Invisible keyboard gestures** (no chrome, per §11): Ctrl+Alt+↑ = his last
+  reach felt right, Ctrl+Alt+↓ = felt wrong, Ctrl+Alt+M = he should have reached
+  here. A faint italic acknowledgment flashes ~1.6s, then fades. The rating
+  surface never enters Dave's own context (A1).
+
+cargo test 81/81; tsc clean.
+
+---
+
 ## 2026-07-08 — Polish batch, model A/B, A8 review, PIY roadmap
 
 **Model A/B (stock vs fine-tunes).** Ran an identical Dave-probing battery +

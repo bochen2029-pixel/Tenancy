@@ -243,6 +243,24 @@ fn init_schema(conn: &Connection) -> Result<()> {
             last_user_input INTEGER NOT NULL,
             FOREIGN KEY(conversation_id) REFERENCES conversations(id)
         );
+        -- Curation surface (PIY §4.7): the operator's single-bit judgment on
+        -- Dave's SELF-INITIATED reaches, turning outreach logs into a labeled
+        -- Tier-1 (learned-initiation) training corpus. reach_ratings keys off
+        -- the delivered reach message; reach_counterfactuals records "you
+        -- should have reached here and didn't".
+        CREATE TABLE IF NOT EXISTS reach_ratings (
+            message_id INTEGER PRIMARY KEY,
+            rating INTEGER NOT NULL,          -- +1 felt right, -1 felt wrong
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY(message_id) REFERENCES messages(id)
+        );
+        CREATE TABLE IF NOT EXISTS reach_counterfactuals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id INTEGER NOT NULL,
+            at_message_id INTEGER,            -- the message after which a reach was wanted
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY(conversation_id) REFERENCES conversations(id)
+        );
         CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_journal_unread ON journal(surfaced_at) WHERE surfaced_at IS NULL;
         CREATE INDEX IF NOT EXISTS idx_outreach_drops_conv ON outreach_drops(conversation_id, generated_at);
@@ -876,6 +894,67 @@ pub fn get_setting_blocking(db: &DbHandle, key: &str) -> Result<Option<String>> 
         )
         .optional()?;
     Ok(val)
+}
+
+/// Rate Dave's most recent SELF-INITIATED reach in a conversation. `rating`
+/// is +1 (felt right) or -1 (felt wrong); 0 clears any existing rating.
+/// Returns the message id that was rated, or None if the conversation has no
+/// Dave-initiated message to rate. Part of the PIY curation surface — the
+/// label that turns `outreach_drops` + delivered reaches into Tier-1 corpus.
+pub async fn rate_last_reach(
+    db: &DbHandle,
+    conversation_id: i64,
+    rating: i64,
+) -> Result<Option<i64>> {
+    let db = db.clone();
+    tokio::task::spawn_blocking(move || -> Result<Option<i64>> {
+        let conn = db.lock().unwrap();
+        let mid: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM messages
+                 WHERE conversation_id = ?1 AND role = 'assistant' AND initiated_by_dave = 1
+                 ORDER BY id DESC LIMIT 1",
+                params![conversation_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(mid) = mid else { return Ok(None) };
+        if rating == 0 {
+            conn.execute("DELETE FROM reach_ratings WHERE message_id = ?1", params![mid])?;
+        } else {
+            let now = Utc::now().timestamp();
+            conn.execute(
+                "INSERT INTO reach_ratings (message_id, rating, created_at) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(message_id) DO UPDATE SET rating = excluded.rating, created_at = excluded.created_at",
+                params![mid, rating, now],
+            )?;
+        }
+        Ok(Some(mid))
+    })
+    .await?
+}
+
+/// Record a "you should have reached here and didn't" counterfactual at the
+/// current end of the conversation. Part of the PIY curation surface.
+pub async fn mark_missed_reach(db: &DbHandle, conversation_id: i64) -> Result<()> {
+    let db = db.clone();
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        let conn = db.lock().unwrap();
+        let at: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM messages WHERE conversation_id = ?1 ORDER BY id DESC LIMIT 1",
+                params![conversation_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let now = Utc::now().timestamp();
+        conn.execute(
+            "INSERT INTO reach_counterfactuals (conversation_id, at_message_id, created_at) VALUES (?1, ?2, ?3)",
+            params![conversation_id, at, now],
+        )?;
+        Ok(())
+    })
+    .await?
 }
 
 /// Wipe all conversation/journal/drops data and reset presence. Used by the

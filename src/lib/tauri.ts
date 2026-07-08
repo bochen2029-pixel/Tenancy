@@ -171,6 +171,15 @@ export const ipc = {
   setSystemPrompt: (text: string) =>
     invoke<void>('set_system_prompt', { text }),
   resetSystemPrompt: () => invoke<string>('reset_system_prompt'),
+
+  // Curation surface (PIY §4.7). Invisible keyboard gestures rate Dave's most
+  // recent self-initiated reach so his outreach logs become Tier-1 corpus.
+  // rating: 1 = felt right, -1 = felt wrong, 0 = clear. Returns the rated
+  // message id, or null if there was no reach to rate.
+  rateLastReach: (conversationId: number, rating: number) =>
+    invoke<number | null>('rate_last_reach', { conversationId, rating }),
+  markMissedReach: (conversationId: number) =>
+    invoke<void>('mark_missed_reach', { conversationId }),
 };
 
 export type Unlisten = UnlistenFn;

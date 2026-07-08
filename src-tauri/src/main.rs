@@ -114,6 +114,8 @@ fn main() {
             commands::get_system_prompt,
             commands::set_system_prompt,
             commands::reset_system_prompt,
+            commands::rate_last_reach,
+            commands::mark_missed_reach,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -868,3 +868,19 @@ After implementing a feature that modifies the persona attractor
 session begins by handing CLAUDE.md plus the diff to a 
 fresh-context instance for architectural review before further
 work. This prevents sunk-context bias from propagating.
+
+### A9. The Settings admin panel is an accepted debug/operator exception to §2 and §11
+The Ctrl+, Settings panel exposes a model switcher (GGUF filenames + sizes), a
+thinking toggle, and a persona editor that renders Dave's full system prompt in
+an editable textarea. This directly contradicts §2 ("the only way the user
+changes it is by editing prompts.rs and rebuilding") and §11 ("model name
+visible anywhere"). It is retained deliberately as a single-operator
+admin/testing surface — model A/B, persona iteration, thinking experiments —
+gated behind the gear / Ctrl+, so it never appears in normal use. This exception
+holds ONLY because Dave is single-operator and Bo is the operator. If Dave is
+ever distributed to anyone else, this panel MUST be compiled out of release
+builds (cfg!(debug_assertions) or a Cargo feature), not merely hidden — a
+curious user opening it is the single largest spell-break available in the app.
+A1/A7 (harness invisibility, defense-in-depth) still apply to everything it can
+produce. Recorded 2026-07-08 per the A8 fresh-instance review of the model/
+persona/thinking work.

@@ -26,6 +26,13 @@ use std::path::PathBuf;
 /// the same DB the rest of the app already consults.
 pub const SETTING_KEY_ACTIVE_SYSTEM_PROMPT: &str = "active_system_prompt";
 
+/// Settings key — "1" only when the operator has explicitly applied a persona
+/// via the Settings panel. `resolve_active_system_prompt` requires this before
+/// honoring `active_system_prompt`, so a leftover/experimental prompt row that
+/// was never pinned stays inert and Dave remains Dave. Guards against the
+/// 2026-07-08 class of bug where a forgotten override silently replaced Dave.
+pub const SETTING_KEY_PERSONA_PINNED: &str = "persona_pinned";
+
 /// Directory where the Settings panel surfaces preset persona `*.txt` files.
 /// Resolved portably so a packaged build on a bare machine never depends on
 /// the dev tree:
@@ -277,6 +284,16 @@ pub fn load_persona_file(path: &str) -> Option<String> {
 pub async fn resolve_active_system_prompt(
     db: &crate::persistence::DbHandle,
 ) -> String {
+    // Only honor a persisted persona if it was explicitly PINNED via the
+    // Settings panel (set_system_prompt). An unpinned row — a stale A/B
+    // persona left in the DB — is inert; we fall back to built-in Dave.
+    let pinned = match crate::persistence::get_setting(db, SETTING_KEY_PERSONA_PINNED).await {
+        Ok(Some(v)) => matches!(v.as_str(), "1" | "true" | "TRUE"),
+        _ => false,
+    };
+    if !pinned {
+        return SYSTEM_PROMPT.to_string();
+    }
     match crate::persistence::get_setting(db, SETTING_KEY_ACTIVE_SYSTEM_PROMPT).await {
         Ok(Some(s)) if !s.trim().is_empty() => s,
         _ => SYSTEM_PROMPT.to_string(),

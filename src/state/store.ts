@@ -54,6 +54,10 @@ interface DaveState {
   settingsPanelOpen: boolean;
   memoryPanelOpen: boolean;
 
+  /// Transient, faint acknowledgment text for the invisible curation gestures
+  /// (rating a reach / marking a missed reach). Auto-clears after ~1.6s.
+  flash: string | null;
+
   init: () => Promise<void>;
   setReady: (v: boolean) => void;
   setInitError: (msg: string) => void;
@@ -73,6 +77,12 @@ interface DaveState {
   toggleMemoryPanel: () => void;
   closeMemoryPanel: () => void;
   reloadAfterDbReset: () => Promise<void>;
+
+  /// Curation gestures (PIY §4.7). rating: 1 = felt right, -1 = felt wrong,
+  /// 0 = clear. Operate on Dave's most recent self-initiated reach.
+  rateLastReach: (rating: number) => Promise<void>;
+  markMissedReach: () => Promise<void>;
+  showFlash: (msg: string) => void;
 }
 
 export const useDaveStore = create<DaveState>((set, get) => ({
@@ -91,6 +101,7 @@ export const useDaveStore = create<DaveState>((set, get) => ({
   dropsPanelOpen: false,
   settingsPanelOpen: false,
   memoryPanelOpen: false,
+  flash: null,
 
   setReady: (v) => set({ ready: v }),
   setInitError: (msg) => set({ initError: msg }),
@@ -315,5 +326,42 @@ export const useDaveStore = create<DaveState>((set, get) => ({
     } catch (e) {
       console.error('reload after db reset failed:', e);
     }
+  },
+
+  rateLastReach: async (rating) => {
+    const cid = get().conversationId;
+    if (!cid) return;
+    try {
+      const id = await ipc.rateLastReach(cid, rating);
+      get().showFlash(
+        id == null
+          ? 'nothing of his to mark'
+          : rating > 0
+          ? 'kept'
+          : rating < 0
+          ? 'let go'
+          : 'cleared',
+      );
+    } catch (e) {
+      console.error('rateLastReach failed:', e);
+    }
+  },
+
+  markMissedReach: async () => {
+    const cid = get().conversationId;
+    if (!cid) return;
+    try {
+      await ipc.markMissedReach(cid);
+      get().showFlash('here, he should have');
+    } catch (e) {
+      console.error('markMissedReach failed:', e);
+    }
+  },
+
+  showFlash: (msg) => {
+    set({ flash: msg });
+    setTimeout(() => {
+      if (get().flash === msg) set({ flash: null });
+    }, 1600);
   },
 }));

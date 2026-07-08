@@ -1365,6 +1365,11 @@ pub async fn set_system_prompt(
     .await
     .map_err(|e| format!("persist system prompt: {}", e))?;
 
+    // Pin the persona. resolve_active_system_prompt only honors a persisted
+    // prompt when this flag is set, so an unpinned leftover row (e.g. a stale
+    // A/B persona) can never silently override Dave at the next boot.
+    let _ = persistence::set_setting(&state.db, prompts::SETTING_KEY_PERSONA_PINNED, "1").await;
+
     // Then update the cache. Workers see the new value on their next read.
     {
         let mut guard = state.system_prompt.write().unwrap();
@@ -1395,6 +1400,10 @@ pub async fn reset_system_prompt(
     .await
     .map_err(|e| format!("clear system prompt setting: {}", e))?;
 
+    // Unpin — future boots fall back to the built-in default even if a prompt
+    // string lingers in the setting.
+    let _ = persistence::set_setting(&state.db, prompts::SETTING_KEY_PERSONA_PINNED, "0").await;
+
     let default = prompts::SYSTEM_PROMPT.to_string();
     {
         let mut guard = state.system_prompt.write().unwrap();
@@ -1403,4 +1412,37 @@ pub async fn reset_system_prompt(
 
     tracing::info!("reset_system_prompt: reverted to in-binary default");
     Ok(default)
+}
+
+// ============================================================================
+// Curation surface (PIY §4.7 Phase 1) — the operator's single-bit judgment on
+// Dave's SELF-INITIATED reaches. Invisible keyboard gestures in the frontend
+// (no chrome, per §11) call these; the labels join `outreach_drops` +
+// delivered reaches into a Tier-1 (learned-initiation) training corpus.
+// ============================================================================
+
+/// Rate Dave's most recent self-initiated reach. `rating` = 1 (felt right),
+/// -1 (felt wrong), or 0 (clear). Returns the rated message id, or None when
+/// the conversation has no reach to rate.
+#[tauri::command]
+pub async fn rate_last_reach(
+    state: State<'_, AppState>,
+    conversation_id: i64,
+    rating: i64,
+) -> Result<Option<i64>, String> {
+    persistence::rate_last_reach(&state.db, conversation_id, rating)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Record "you should have reached here and didn't" at the current end of the
+/// conversation.
+#[tauri::command]
+pub async fn mark_missed_reach(
+    state: State<'_, AppState>,
+    conversation_id: i64,
+) -> Result<(), String> {
+    persistence::mark_missed_reach(&state.db, conversation_id)
+        .await
+        .map_err(|e| e.to_string())
 }
