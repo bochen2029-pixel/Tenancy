@@ -9,6 +9,30 @@ To roll back a change: `cp -r .snapshots/<timestamp>_<label>/* ./` then
 
 ---
 
+## 2026-07-08 — Headless "sit with Dave" harness
+
+Answer to "why do you need the GUI to talk to Dave": you don't. The GUI is a
+thin client for the real chat boundary (`run_chat_inference_and_emit`), whose
+only caller was the webview (Tauri IPC has no external socket). Added a headless
+entry — `DAVE_HEADLESS=1` in `main()` → `headless.rs` — that reuses the exact
+public seam (`persistence` + `memory_assembler::partition` + `build_chat_messages`
++ `llama_client::chat_stream`) to reproduce Dave's real mind (live persona + full
+memory partition) from stdin. NON-DESTRUCTIVE: it never writes the test turns
+back to the DB, so it uses Dave's real memory as backdrop without polluting his
+history. Env: `DAVE_DB` selects the database; assumes llama-server on :8080.
+Run the *debug* binary (release is `windows_subsystem`, no console).
+
+Verified against the operator's real 233-message DB on K0D: Dave showed genuine
+continuity — surfaced content from actual history ("TARS architecture",
+"self-editing sys-prompt") that is in neither the persona nor the prompt. That's
+the thing raw-model-on-:8080 cannot do. Doubles as an integration-test harness.
+
+Observation: that 233-msg history assembles to **~49k tokens/turn** (of the
+65536 budget) — long conversations run near-full context, so prompt eval slows.
+A candidate for memory-horizon (§7) tuning later.
+
+---
+
 ## 2026-07-08 — Hardening + curation surface (A9, persona-pin, PIY §4.7)
 
 Follow-on to the QC/packaging/polish work, acting on the A8 review + PIY roadmap.

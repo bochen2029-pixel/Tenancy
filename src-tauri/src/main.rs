@@ -6,6 +6,7 @@ mod commands;
 mod consolidation;
 mod discriminator;
 mod harness;
+mod headless;
 mod idle_worker;
 mod leak;
 mod llama_client;
@@ -54,6 +55,14 @@ fn main() {
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("dave=info,llama=info")),
         )
         .try_init();
+
+    // Headless "sit with Dave" harness — reproduces the real chat pipeline
+    // (persona + memory partition + model) without the webview. Used for
+    // testing Dave's mind headlessly. Assumes llama-server is already up.
+    if std::env::var("DAVE_HEADLESS").is_ok() {
+        headless::run();
+        return;
+    }
 
     tauri::Builder::default()
         .setup(|app| {
