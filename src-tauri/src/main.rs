@@ -175,9 +175,15 @@ async fn init(app: AppHandle) -> anyhow::Result<()> {
     let client = Arc::new(llama_client::LlamaClient::new("http://127.0.0.1:8080"));
 
     let chat_in_flight = Arc::new(AtomicBool::new(false));
-    // Window starts focused (Tauri shows it foreground on launch). Updated by
-    // the WindowEvent::Focused handler; read by the presence sensor.
-    let window_focused = Arc::new(AtomicBool::new(true));
+    // Seed from the ACTUAL window focus (not an assumed true) so a
+    // launched-minimized / unfocused start doesn't mislabel presence as
+    // in_chat and wrongly suppress reaching. Thereafter the
+    // WindowEvent::Focused handler keeps it current.
+    let initial_focus = app
+        .get_webview_window("main")
+        .and_then(|w| w.is_focused().ok())
+        .unwrap_or(true);
+    let window_focused = Arc::new(AtomicBool::new(initial_focus));
 
     // Resolve the live system prompt now (DB setting overrides the in-binary
     // default). One-time read at boot; after this, every read goes through

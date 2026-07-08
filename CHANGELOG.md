@@ -9,6 +9,26 @@ To roll back a change: `cp -r .snapshots/<timestamp>_<label>/* ./` then
 
 ---
 
+## 2026-07-08 — Initiation-timing Stage 1a: presence hard-gate (behavior change)
+
+The core of the self-initiation mechanic. Dave now reaches out **only when the
+operator is present-but-elsewhere** — at the machine but not focused on his
+window. He no longer reaches into an empty room (`away`) or interrupts an active
+session (`in_chat`). Implemented as a hard governor in the outreach decision,
+applied **before** the timing model (governors dispose; the model only proposes
+within the envelope). `away`/`in_chat` → `hold_presence_gate`; `unknown` (sensor
+unavailable) is allowed for graceful degradation (near-impossible on Windows).
+
+Also fixed (Stage 0 A8-review finding): `window_focused` is now seeded from the
+actual window focus at init, not an assumed `true`, so a launched-unfocused
+start cannot mislabel presence.
+
+This is a deliberate behavior change to Dave's agency and was A8-reviewed as its
+own commit. Fully reversible (the governor is a single `if`). Verified: cargo
+test 81/81, cargo check clean.
+
+---
+
 ## 2026-07-08 — Initiation-timing Stage 0: presence sensor + anchor corpus + timing seam
 
 First PR of the learned initiation-timing system (PIY §4 + the design-panel

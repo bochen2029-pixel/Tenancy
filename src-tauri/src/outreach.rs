@@ -175,6 +175,10 @@ struct TimingFeatures {
 enum HoldReason {
     AdaptiveBackoff,
     MaxUnanswered,
+    /// Hard presence governor: the operator is not present-but-elsewhere
+    /// (they're away, or actively in the chat), so a reach would either shout
+    /// into an empty room or interrupt an active session.
+    PresenceGate,
 }
 
 impl HoldReason {
@@ -182,6 +186,7 @@ impl HoldReason {
         match self {
             HoldReason::AdaptiveBackoff => "hold_adaptive_backoff",
             HoldReason::MaxUnanswered => "hold_max_unanswered",
+            HoldReason::PresenceGate => "hold_presence_gate",
         }
     }
 }
@@ -343,7 +348,17 @@ async fn tick(
         consecutive_drops,
         prior_count,
     };
-    let decision = HeuristicTimer.decide(&features);
+    // Hard presence governor (runs BEFORE the timing model — governors dispose,
+    // the model only proposes within the envelope): reach only when the
+    // operator is present-but-elsewhere. Never shout into an empty room (away)
+    // or interrupt an active session (in_chat). This is the core of the
+    // self-initiation mechanic — Dave reaches when you're at the machine but
+    // not looking at him.
+    let decision = if !presence_state.reach_allowed() {
+        TimingDecision::Hold(HoldReason::PresenceGate)
+    } else {
+        HeuristicTimer.decide(&features)
+    };
     let decision_str = match &decision {
         TimingDecision::Reach => "reach",
         TimingDecision::Hold(r) => r.as_str(),

@@ -50,12 +50,17 @@ impl PresenceState {
             PresenceState::Unknown => "unknown",
         }
     }
-    /// Whether a self-initiated reach is permissible in this state. Hard gate
-    /// for the FUTURE learned timer: only reach when present-but-elsewhere.
-    /// Not yet enforced in Stage 0 (sense-only).
-    #[allow(dead_code)]
+    /// Whether a self-initiated reach is permissible in this state. Hard
+    /// governor: reach only when present-but-elsewhere. Unknown (sensor
+    /// unavailable) is treated as allowed — graceful degradation, so a sensor
+    /// glitch falls back to the prior behavior rather than silencing Dave —
+    /// but that case is near-impossible on Windows (idle is always readable
+    /// when the window is unfocused).
     pub fn reach_allowed(&self) -> bool {
-        matches!(self, PresenceState::PresentElsewhere)
+        matches!(
+            self,
+            PresenceState::PresentElsewhere | PresenceState::Unknown
+        )
     }
 }
 
