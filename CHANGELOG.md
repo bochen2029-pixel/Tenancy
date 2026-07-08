@@ -9,6 +9,48 @@ To roll back a change: `cp -r .snapshots/<timestamp>_<label>/* ./` then
 
 ---
 
+## 2026-07-08 — Corpus inspector + rebuild the release binary that lacked the sensors
+
+Session-resume verification (git 81/81, clean tree — all trustworthy) turned up
+the thing the handoff narrative could not: **the initiation-timing corpus can't
+accumulate, because the release/portable `dave.exe` Bo runs was built at 10:51,
+an hour before Stage 0 landed at 11:50.** It contained none of the presence
+sensor, anchor logging, hard-gate, or timing seam. The empty corpus tables in
+the release DB were created by the headless/debug binary touching that file, not
+by live sensing. So "just wait for the corpus to fill from daily use" was a
+no-op — the sensing code wasn't in the shipped binary. Same irreplaceable-data
+risk the roadmap warns about, caused by a stale binary rather than a code bug.
+
+- **`tools/corpus_inspect.py` (new):** the measuring stick for the accumulation
+  phase (roadmap §3d). Read-only, stdlib-only, self-testing (`--selftest`).
+  Reports the four corpus tables, the reach/hold/**presence-gate-override**
+  breakdowns, presence distribution, and — the load-bearing part —
+  reconstructs **arming episodes → reach EVENTS vs "user spoke first" CENSORED**
+  observations (the actual V0 training set), with a READINESS verdict vs a
+  target N. Doubles as the data-loader front-end for the eventual `fit_v0.py`.
+  Schema-drift guard fails loud (exit 2) rather than reading the wrong columns.
+- **Rebuilt `target/release/dave.exe` from current clean source** (matches HEAD;
+  no new uncommitted changes). Verified FRESH three ways: mtime 12:25 > newest
+  source 12:02; the sensor string literals (`present_elsewhere`,
+  `hold_presence_gate`, `initiation_anchors`, `timer_decision`,
+  `presence_samples`) are all embedded in the binary; portable copy refreshed to
+  a SHA-256-identical exe. `dist/` was already current (backend-only changes), so
+  a bare `cargo build --release` sufficed — no frontend rebuild.
+
+The two `insert_presence_sample` / `insert_initiation_anchor` inserts were read
+and confirmed column-for-column correct against the schema, so the empty corpus
+is genuinely "sensors weren't deployed," not a silent write bug.
+
+**NEXT:** Bo runs the fresh portable/release app in normal daily use; re-run
+`python tools/corpus_inspect.py` to watch `presence_samples` / `initiation_anchors`
+fill (the tool prints exactly how to confirm the sensor is live). The NSIS
+installer (`Dave_0.1.0_x64-setup.exe`) is still the stale 10:51 build — if Bo
+runs an *installed* copy rather than the portable exe, repackage with
+`pnpm tauri build`. V0/blind-A/B stay gated on the corpus reaching the readiness
+floor, per the continuation doc §3a.
+
+---
+
 ## 2026-07-08 — Initiation-timing Stage 1b: A8-review refinements
 
 Applies the three concrete findings from the Stage 1a fresh-instance A8 review:
