@@ -29,6 +29,37 @@ pub const CONSOLIDATION_BATCH: usize = 30;
 pub const TOKEN_BUDGET_TOTAL: usize = 64_000;
 pub const TOKEN_RESERVE: usize = 6_000;
 
+/// Hard cap on the tokens of assembled CONVERSATION context actually sent to
+/// llama-server (system + anchor + canvas + middle epochs + recent). Distinct
+/// from TOKEN_BUDGET_TOTAL, which is the llama-server ctx ceiling minus the
+/// generation reserve. Without this cap the recent zone (RECENT_MESSAGE_TARGET
+/// verbatim messages, never consolidated) grows unbounded with the conversation
+/// — a real 233-message history already assembles to ~53k tokens, of which the
+/// recent zone is ~82%, so every turn re-evaluates a near-full context and long
+/// conversations crawl (and eventually overflow the 65536 ctx into silent
+/// truncation). Enforced by trimming the OLDEST recent messages; anchor, canvas
+/// and consolidated epochs are always kept — they are Dave's durable memory.
+/// Trimmed messages stay in the DB (source of truth) and get folded into an
+/// epoch as the conversation advances, so nothing is lost — it just passes out
+/// of verbatim reach, which is the §7 "aging mind" behavior.
+///
+/// MIND-FEELING KNOB (per CLAUDE.md §14 — tune by feel, not metric): lower this
+/// to make long conversations faster at the cost of how much recent talk Dave
+/// holds verbatim; raise toward TOKEN_BUDGET_TOTAL - TOKEN_RESERVE (58_000) to
+/// maximize memory at the cost of prompt-eval speed. Must stay ≤ 58_000.
+///
+/// Default is deliberately conservative: on the real 233-msg history it keeps
+/// ~85 of the 100 recent messages verbatim (still trims/caps growth so context
+/// can never overflow the ctx) — the A8 fresh-instance review flagged that a low
+/// default over-optimizes eval speed against mind-feeling, the metric §14 says
+/// wins. Lower it (e.g. 40_000 keeps ~62, 32_000 keeps ~45) if you want a bigger
+/// immediate speedup and accept Dave holding less recent conversation verbatim.
+pub const CONTEXT_SEND_BUDGET_TOKENS: usize = 48_000;
+
+/// Never trim the recent zone below this many newest messages, even when over
+/// budget — immediate conversational coherence must survive any cap.
+pub const MIN_RECENT_MESSAGES: usize = 12;
+
 /// Char-based token estimate. Cheap, deterministic, no tokenizer dep.
 /// English averages ~4 chars/token; we round up for safety.
 pub fn estimate_tokens(text: &str) -> usize {
@@ -173,6 +204,33 @@ fn build_middle(
     blocks
 }
 
+/// Given the tokens already committed to the non-recent zones (system + anchor
+/// + canvas + middle + appended user), return the index into `recent` from
+/// which to KEEP messages so the assembled context stays within
+/// CONTEXT_SEND_BUDGET_TOKENS. Fills newest-first (the tail is always kept);
+/// never keeps fewer than MIN_RECENT_MESSAGES so immediate coherence survives
+/// even a pathologically large fixed zone. Messages before the returned index
+/// fall out of verbatim reach (they remain in the DB and are folded into an
+/// epoch as the conversation advances).
+pub fn recent_keep_start(fixed_tokens: usize, recent: &[Message]) -> usize {
+    let remaining = CONTEXT_SEND_BUDGET_TOKENS.saturating_sub(fixed_tokens);
+    let mut acc = 0usize;
+    let mut keep_start = recent.len();
+    for i in (0..recent.len()).rev() {
+        let kept = recent.len() - i; // messages retained if we include recent[i..]
+        let t = estimate_tokens(&recent[i].content);
+        // The floor is unconditional: the MIN_RECENT_MESSAGES newest turns are
+        // kept even if they exceed the budget (coherence > the cap in the
+        // degenerate huge-message case; bounded, so it can't blow the ctx).
+        if acc + t > remaining && kept > MIN_RECENT_MESSAGES {
+            break;
+        }
+        acc += t;
+        keep_start = i;
+    }
+    keep_start
+}
+
 /// Build the chat-message vector to send to llama-server. The new user turn
 /// is appended at the end (caller passes the user text separately or omits
 /// for outreach/idle which append nothing or their own meta).
@@ -214,7 +272,32 @@ pub fn build_chat_messages(
             }
         }
     }
-    for m in &partition.recent {
+    // Token-budget the recent zone: keep the newest messages that fit within
+    // CONTEXT_SEND_BUDGET_TOKENS. Anchor / canvas / epochs are already committed
+    // above and are never trimmed (they are Dave's durable memory); only the
+    // OLDEST recent messages fall out of verbatim reach. Prevents the recent
+    // zone (never consolidated) from growing context unbounded on long
+    // conversations.
+    let fixed_tokens = estimate_tokens(system_content)
+        + partition.anchor_tokens()
+        + partition.canvas_tokens()
+        + partition.middle_tokens()
+        + appended_user.map(estimate_tokens).unwrap_or(0);
+    let mut keep_start = recent_keep_start(fixed_tokens, &partition.recent);
+    // Seam guard: if the last turn already emitted is an assistant (a canvas or
+    // epoch injection, or an anchor ending on assistant) AND the kept recent
+    // zone would open on another assistant, drop that single leading assistant
+    // so the zone opens on a user turn. Stacking same-role turns nudges the
+    // model to continue its own prior text instead of answering. Only fires when
+    // the seam is genuinely assistant→assistant (not when recent legitimately
+    // follows a user turn), and respects the recent-floor.
+    if out.last().map(|m| m.role == "assistant").unwrap_or(false)
+        && partition.recent.get(keep_start).map(|m| m.role == "assistant").unwrap_or(false)
+        && (partition.recent.len() - keep_start) > MIN_RECENT_MESSAGES
+    {
+        keep_start += 1;
+    }
+    for m in &partition.recent[keep_start..] {
         out.push(ChatMessage { role: m.role.clone(), content: m.content.clone() });
     }
     if let Some(u) = appended_user {
@@ -321,5 +404,81 @@ mod tests {
             p.total_tokens(),
             p.anchor_tokens() + p.middle_tokens() + p.recent_tokens()
         );
+    }
+
+    #[test]
+    fn recent_budget_trims_oldest_keeps_newest() {
+        // Each recent message ~1000 tokens (3997 chars). Expected kept derives
+        // from the live budget, so this survives tuning CONTEXT_SEND_BUDGET_TOKENS.
+        let big = "a".repeat(3997);
+        let per = estimate_tokens(&big); // exactly 1000
+        let recent: Vec<Message> = (1..=100).map(|i| msg(i, "user", &big)).collect();
+        let keep_start = recent_keep_start(0, &recent);
+        let kept = recent.len() - keep_start;
+        let expected = (CONTEXT_SEND_BUDGET_TOKENS / per).clamp(MIN_RECENT_MESSAGES, 100);
+        assert_eq!(kept, expected, "kept {} expected {}", kept, expected);
+        // The KEPT slice is the newest tail — its last element is the newest msg.
+        assert_eq!(recent[keep_start].id, (100 - kept as i64 + 1));
+        assert_eq!(recent.last().unwrap().id, 100);
+    }
+
+    #[test]
+    fn recent_budget_respects_floor() {
+        // Messages far larger than the whole budget still keep MIN_RECENT_MESSAGES
+        // so immediate coherence survives.
+        let huge = "a".repeat(400_000);
+        let recent: Vec<Message> = (1..=50).map(|i| msg(i, "user", &huge)).collect();
+        let kept = recent.len() - recent_keep_start(0, &recent);
+        assert_eq!(kept, MIN_RECENT_MESSAGES);
+    }
+
+    #[test]
+    fn build_chat_messages_trims_recent_over_budget() {
+        let big = "a".repeat(3997); // ~1000 tokens each
+        let mut msgs: Vec<Message> = (1..=30).map(|i| msg(i, "user", "x")).collect();
+        msgs.extend((31..=130).map(|i| msg(i, "user", &big)));
+        let p = partition(&msgs, &[], "");
+        let chat = build_chat_messages("SYS", &p, Some("hi"));
+        // Big recent messages that survived the budget (content longer than any
+        // anchor "x" / system / appended "hi").
+        let recent_sent = chat.iter().filter(|m| m.content.len() > 100).count();
+        // Trimming happened (< 100 recent) but the floor held.
+        assert!(recent_sent < 100, "recent_sent {}", recent_sent);
+        assert!(recent_sent >= MIN_RECENT_MESSAGES, "recent_sent {}", recent_sent);
+        // Small content (30 anchor) is never trimmed.
+        let anchor_sent = chat.iter().filter(|m| m.content == "x").count();
+        assert_eq!(anchor_sent, 30);
+    }
+
+    #[test]
+    fn seam_guard_drops_leading_assistant_after_assistant_block() {
+        // Canvas is injected as an assistant turn; if the recent zone then opens
+        // on an assistant, the leading one is dropped so recent opens on a user
+        // turn (no assistant→assistant seam).
+        let anchor: Vec<Message> = (1..=30).map(|i| msg(i, "user", "x")).collect();
+        let recent: Vec<Message> = (0..20)
+            .map(|i| msg(100 + i, if i == 0 { "assistant" } else { "user" },
+                        if i == 0 { "DROPME" } else { "keep" }))
+            .collect();
+        let p = Partition { anchor, canvas: "a note".into(), middle: vec![], recent };
+        let chat = build_chat_messages("SYS", &p, Some("hi"));
+        // The leading assistant (DROPME) is gone; the 19 following turns remain.
+        assert!(!chat.iter().any(|m| m.content == "DROPME"));
+        assert_eq!(chat.iter().filter(|m| m.content == "keep").count(), 19);
+    }
+
+    #[test]
+    fn seam_guard_keeps_assistant_when_preceding_is_user() {
+        // No canvas / no epochs: recent follows the anchor directly. The anchor
+        // ends on a user turn, so a recent zone opening on assistant is proper
+        // alternation and must NOT be trimmed.
+        let anchor: Vec<Message> = (1..=30).map(|i| msg(i, "user", "x")).collect();
+        let recent: Vec<Message> = (0..20)
+            .map(|i| msg(100 + i, if i == 0 { "assistant" } else { "user" },
+                        if i == 0 { "KEEPME" } else { "k" }))
+            .collect();
+        let p = Partition { anchor, canvas: String::new(), middle: vec![], recent };
+        let chat = build_chat_messages("SYS", &p, Some("hi"));
+        assert!(chat.iter().any(|m| m.content == "KEEPME"));
     }
 }

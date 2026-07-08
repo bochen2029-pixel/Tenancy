@@ -9,6 +9,52 @@ To roll back a change: `cp -r .snapshots/<timestamp>_<label>/* ./` then
 
 ---
 
+## 2026-07-08 — Memory-horizon tuning: token-budget the recent zone (§7/§3d)
+
+Diagnosis (offline replay of the real 233-msg history): the assembled context is
+~54k tokens/turn, and the breakdown is NOT "consolidation isn't aggressive" —
+consolidation is excellent (103 middle messages compressed ~7× into 6 epochs =
+6.4k). The bloat is the **recent zone: `RECENT_MESSAGE_TARGET`=100 messages held
+verbatim = ~44k = 82% of context**, which the consolidator never compresses (it
+only touches messages older than `total - 100`). And there was **no token-budget
+enforcement anywhere** — `TOKEN_BUDGET_TOTAL` was a display-only number, so
+context grows unbounded until it overflows the 65536 ctx (silent truncation) and
+long conversations crawl on prompt-eval.
+
+Fix (memory_assembler.rs): added `CONTEXT_SEND_BUDGET_TOKENS` (default 48_000) +
+`recent_keep_start()`. `build_chat_messages` now trims the OLDEST recent messages
+to keep assembled context within budget; anchor, canvas and epochs are always
+kept (Dave's durable memory), and at least `MIN_RECENT_MESSAGES`=12 newest always
+survive. Trimmed messages stay in the DB and fold into an epoch as the
+conversation advances (§7 "aging mind"). `partition()` is unchanged, so
+consolidation semantics are untouched. On the real DB, 48_000 keeps 79/100 recent
+(~54k→48k, 11%); it's a documented MIND-FEELING KNOB (§14) — 40_000 keeps 62
+(28%), 32_000 keeps 42 (42%) for more speed at the cost of recent verbatim.
+
+**A8 fresh-instance review: GO-WITH-CHANGES, all applied.** (1) Raised the default
+from an initial aggressive 40_000 to 48_000 — a low default over-optimizes eval
+speed against mind-feeling, the metric §1/§14 says wins. (2) Added a **seam
+guard**: trimming could make the recent zone open on an assistant turn, stacking
+with the assistant-injected epochs/canvas (nudging the model to continue its own
+text); the guard drops a single leading assistant so recent opens on a user turn
+— but ONLY when the preceding emitted turn is genuinely assistant (not when recent
+legitimately follows a user turn). (3) See the fade note below.
+
+**KNOWN, UNADDRESSED (§14 writeup, not silent): the §7 opacity fade now
+over-reports memory.** `buffer_size()` returns a static 100 and `memory.ts` fades
+everything older than `totalLen-100`, but the backend now sends only ~79 recent —
+so ~21 messages render as remembered while being out of Dave's verbatim reach.
+(The fade was already impressionistic: it also shows the always-kept anchor as
+faded and doesn't reflect epoch substitution.) Follow-up: have the backend report
+the real recent-keep count so the fade tracks what's actually sent. Tracked as a
+spawned task.
+
+Verified: cargo test **86/86** (+5: budget trim/floor/over-budget, seam
+fires/doesn't-fire). NOT yet in a built binary — the release/portable exe needs a
+`cargo build --release` for Bo to feel it (source-vs-binary freshness discipline).
+
+---
+
 ## 2026-07-08 — Corpus inspector + rebuild the release binary that lacked the sensors
 
 Session-resume verification (git 81/81, clean tree — all trustworthy) turned up
