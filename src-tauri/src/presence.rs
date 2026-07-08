@@ -23,8 +23,10 @@ use tokio::time::{sleep, Duration};
 use crate::persistence::{self, DbHandle};
 
 /// No input for longer than this ⇒ operator is AWAY (never reach). Below it,
-/// they are at the keyboard — present.
-const AWAY_IDLE_MS: u64 = 5 * 60 * 1000; // 5 minutes
+/// they are at the keyboard — present. Set at 7 min (not 5) to tolerate
+/// reading a long doc or watching a fullscreen video over Dave without
+/// flipping to "away" and going silent mid-presence.
+const AWAY_IDLE_MS: u64 = 7 * 60 * 1000; // 7 minutes
 /// Presence sampler cadence. Cheap; logs only on state transition.
 const SAMPLE_TICK_SECONDS: u64 = 15;
 

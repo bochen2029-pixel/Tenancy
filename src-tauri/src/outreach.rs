@@ -66,6 +66,12 @@ const OUTREACH_SAMPLE_COUNT: u32 = 3;
 const ADAPTIVE_CAP_GAP_SECONDS: i64 = 3600;
 const ADAPTIVE_DROP_SHIFT_CAP: u32 = 4; // cap left-shift at 4 (16x base)
 
+/// Presence dwell: the operator must have been continuously present-but-
+/// elsewhere for at least this long before Dave may reach, so he doesn't
+/// pounce the instant the window loses focus (which reads as twitchy
+/// surveillance rather than a thoughtful "you drifted off" beat).
+const MIN_PRESENT_DWELL_SECONDS: i64 = 60;
+
 /// Read the user-tunable outreach threshold from settings, clamped to
 /// [MIN, MAX]. Falls back to default on error.
 fn current_threshold_seconds(db: &DbHandle) -> i64 {
@@ -348,16 +354,40 @@ async fn tick(
         consecutive_drops,
         prior_count,
     };
-    // Hard presence governor (runs BEFORE the timing model — governors dispose,
-    // the model only proposes within the envelope): reach only when the
-    // operator is present-but-elsewhere. Never shout into an empty room (away)
-    // or interrupt an active session (in_chat). This is the core of the
-    // self-initiation mechanic — Dave reaches when you're at the machine but
-    // not looking at him.
-    let decision = if !presence_state.reach_allowed() {
-        TimingDecision::Hold(HoldReason::PresenceGate)
+    // The timing model's OWN proposal — computed ALWAYS, so the corpus records
+    // what the timer would have done even on ticks the governor blocks. The
+    // future learned timer trains on THIS, not on the governed result.
+    let timer_proposal = HeuristicTimer.decide(&features);
+    let timer_decision_str = match &timer_proposal {
+        TimingDecision::Reach => "reach",
+        TimingDecision::Hold(r) => r.as_str(),
+    };
+
+    // Hard presence governor (governors dispose; the model only proposes within
+    // the envelope): reach only when the operator is present-but-elsewhere AND
+    // has been for a beat (dwell). Never shout into an empty room (away) or
+    // interrupt an active session (in_chat). The core of the self-initiation
+    // mechanic — Dave reaches when you're at the machine but not looking at him.
+    let present_dwell_ok = match persistence::last_presence_sample(db).await? {
+        Some((s, ts)) if s == crate::presence::PresenceState::PresentElsewhere.as_str() => {
+            (now - ts) >= MIN_PRESENT_DWELL_SECONDS
+        }
+        // No logged present_elsewhere transition yet → just arrived → wait.
+        _ => false,
+    };
+    let governor_allows = if !presence_state.reach_allowed() {
+        false
     } else {
-        HeuristicTimer.decide(&features)
+        match presence_state {
+            crate::presence::PresenceState::PresentElsewhere => present_dwell_ok,
+            _ => true, // Unknown — graceful degradation, no dwell requirement
+        }
+    };
+
+    let decision = if governor_allows {
+        timer_proposal
+    } else {
+        TimingDecision::Hold(HoldReason::PresenceGate)
     };
     let decision_str = match &decision {
         TimingDecision::Reach => "reach",
@@ -365,9 +395,10 @@ async fn tick(
     };
 
     // Log this ARMED tick (past the idle threshold) to the initiation-timing
-    // corpus — the training spine of the learned timer. The censored "user
-    // spoke first" negatives are recovered offline by joining to the next user
-    // message. Presence is recorded but does NOT yet gate (Stage 0: log-only).
+    // corpus — the training spine of the learned timer. `decision` is the final
+    // governed outcome; `timer_decision` is the model's own proposal. The
+    // censored "user spoke first" negatives are recovered offline by joining
+    // to the next user message.
     let _ = persistence::insert_initiation_anchor(
         db,
         conversation_id,
@@ -382,6 +413,7 @@ async fn tick(
         time_of_day_min,
         day_of_week,
         decision_str,
+        timer_decision_str,
     )
     .await;
 

@@ -289,7 +289,10 @@ fn init_schema(conn: &Connection) -> Result<()> {
             threshold_seconds INTEGER NOT NULL,
             time_of_day_min INTEGER NOT NULL, -- minutes since local midnight
             day_of_week INTEGER NOT NULL,     -- 0=Mon .. 6=Sun
-            decision TEXT NOT NULL            -- reach | hold_adaptive_backoff | hold_max_unanswered
+            decision TEXT NOT NULL,           -- final governed: reach | hold_* | hold_presence_gate
+            timer_decision TEXT               -- the timing model's OWN proposal (reach | hold_*),
+                                              -- independent of the presence governor, so the future
+                                              -- learned timer trains on its own signal not the gate
         );
         CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_journal_unread ON journal(surfaced_at) WHERE surfaced_at IS NULL;
@@ -307,6 +310,12 @@ fn init_schema(conn: &Connection) -> Result<()> {
     // SQLite errors if column already exists; ignore.
     let _ = conn.execute(
         "ALTER TABLE messages ADD COLUMN initiated_by_dave INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    // Migration: add timer_decision to initiation_anchors created before the
+    // governor/model split. Ignored if the column already exists.
+    let _ = conn.execute(
+        "ALTER TABLE initiation_anchors ADD COLUMN timer_decision TEXT",
         [],
     );
 
@@ -1026,11 +1035,13 @@ pub async fn insert_initiation_anchor(
     time_of_day_min: i64,
     day_of_week: i64,
     decision: &str,
+    timer_decision: &str,
 ) -> Result<()> {
     let db = db.clone();
     let presence_state = presence_state.to_string();
     let history_shape = history_shape.to_string();
     let decision = decision.to_string();
+    let timer_decision = timer_decision.to_string();
     tokio::task::spawn_blocking(move || -> Result<()> {
         let conn = db.lock().unwrap();
         let now = Utc::now().timestamp();
@@ -1038,15 +1049,34 @@ pub async fn insert_initiation_anchor(
             "INSERT INTO initiation_anchors
              (ts, conversation_id, seconds_since_user_input, presence_state, focused,
               os_idle_ms, history_shape, unanswered_reaches, consecutive_drops,
-              threshold_seconds, time_of_day_min, day_of_week, decision)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+              threshold_seconds, time_of_day_min, day_of_week, decision, timer_decision)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
             params![
                 now, conversation_id, seconds_since_user_input, presence_state, focused as i64,
                 os_idle_ms, history_shape, unanswered_reaches, consecutive_drops,
-                threshold_seconds, time_of_day_min, day_of_week, decision
+                threshold_seconds, time_of_day_min, day_of_week, decision, timer_decision
             ],
         )?;
         Ok(())
+    })
+    .await?
+}
+
+/// Most recent presence sample: (state, ts). Used to compute how long the
+/// operator has been continuously present-but-elsewhere (dwell), so a reach
+/// doesn't fire the instant the window loses focus.
+pub async fn last_presence_sample(db: &DbHandle) -> Result<Option<(String, i64)>> {
+    let db = db.clone();
+    tokio::task::spawn_blocking(move || -> Result<Option<(String, i64)>> {
+        let conn = db.lock().unwrap();
+        let row = conn
+            .query_row(
+                "SELECT state, ts FROM presence_samples ORDER BY id DESC LIMIT 1",
+                [],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
+            )
+            .optional()?;
+        Ok(row)
     })
     .await?
 }

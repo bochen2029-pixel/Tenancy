@@ -9,6 +9,26 @@ To roll back a change: `cp -r .snapshots/<timestamp>_<label>/* ./` then
 
 ---
 
+## 2026-07-08 — Initiation-timing Stage 1b: A8-review refinements
+
+Applies the three concrete findings from the Stage 1a fresh-instance A8 review:
+- **Dwell:** Dave now requires ≥60s of continuous present-but-elsewhere before
+  reaching, so he doesn't pounce the instant the window loses focus (which reads
+  as twitchy surveillance rather than a thoughtful "you drifted off" beat).
+  Computed cheaply from the presence-sample transition timeline.
+- **Corpus cleanliness:** the timing model's OWN proposal is now computed on
+  every armed tick and logged in a new `initiation_anchors.timer_decision`
+  column, separate from the final governed `decision`. So the future learned
+  timer trains on its own signal, not on the presence governor's overrides
+  (otherwise it would be taught to reproduce the governor that's meant to sit
+  outside it).
+- Away threshold nudged 5→7 min (tolerate reading a long doc / fullscreen video
+  over Dave); the stale "log-only" comment corrected.
+
+cargo test 81/81; the new column migrates onto the existing DB.
+
+---
+
 ## 2026-07-08 — Initiation-timing Stage 1a: presence hard-gate (behavior change)
 
 The core of the self-initiation mechanic. Dave now reaches out **only when the
