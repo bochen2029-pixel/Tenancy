@@ -32,11 +32,14 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
     "icon": [
       "icons/icon.ico"
     ],
-    "shortDescription": "",
-    "longDescription": ""
+    "shortDescription": "A small, specific presence that lives in this machine.",
+    "longDescription": "Dave — a locally-hosted companion. Requires llama-server at C:\\llama.cpp and a GGUF model in C:\\models.",
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper" }
+    }
   }
 }

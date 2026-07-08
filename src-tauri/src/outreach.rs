@@ -22,7 +22,7 @@
 use chrono::Utc;
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
 use tokio::time::{sleep, Duration};
@@ -31,6 +31,7 @@ use crate::discriminator::{self, DropReason, LLM_SCORE_PASS_THRESHOLD};
 use crate::llama_client::{ChatMessage, LlamaClient};
 use crate::memory_assembler;
 use crate::persistence::{self, DbHandle, Message};
+#[allow(unused_imports)]
 use crate::prompts;
 
 // L1 tunables
@@ -78,6 +79,7 @@ pub fn spawn(
     db: DbHandle,
     client: Arc<LlamaClient>,
     chat_in_flight: Arc<AtomicBool>,
+    system_prompt: Arc<RwLock<String>>,
 ) -> oneshot::Sender<()> {
     let (tx, mut rx) = oneshot::channel::<()>();
 
@@ -115,7 +117,7 @@ pub fn spawn(
 
             // Pass &Arc<LlamaClient> to tick so it can clone the Arc when
             // calling into helpers that need 'static (e.g. fire_deferred_pending).
-            match tick(&app, &db, &client, &chat_in_flight, last_decision_at, consecutive_drops).await {
+            match tick(&app, &db, &client, &chat_in_flight, &system_prompt, last_decision_at, consecutive_drops).await {
                 Ok(TickOutcome::Skip) => {}
                 Ok(TickOutcome::Reach) => {
                     last_decision_at = Utc::now().timestamp();
@@ -151,6 +153,7 @@ async fn tick(
     db: &DbHandle,
     client: &Arc<LlamaClient>,
     chat_in_flight: &Arc<AtomicBool>,
+    system_prompt: &Arc<RwLock<String>>,
     last_decision_at: i64,
     consecutive_drops: u32,
 ) -> anyhow::Result<TickOutcome> {
@@ -189,6 +192,7 @@ async fn tick(
                 db.clone(),
                 client.clone(),
                 chat_in_flight.clone(),
+                system_prompt.clone(),
                 pending.id,
             )
             .await;
@@ -298,8 +302,9 @@ async fn tick(
     let active_epochs = persistence::list_active_epochs(db, conversation_id).await?;
     let canvas = persistence::get_canvas(db, conversation_id).await?;
     let partition = memory_assembler::partition(&all_msgs, &active_epochs, &canvas);
+    let sys = system_prompt.read().unwrap().clone();
     let messages = memory_assembler::build_chat_messages(
-        prompts::SYSTEM_PROMPT,
+        &sys,
         &partition,
         Some(" "),
     );

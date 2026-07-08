@@ -43,3 +43,13 @@ dave_exports/
 # Build outputs that should not be tracked
 src-tauri/target/release/dave.exe
 src-tauri/target/release/bundle/
+
+# Portable build output (regenerable via `pnpm tauri build`)
+dist-portable/
+# Redundant code snapshots — git history is the source of truth
+backups/
+# Regenerable chunker cache
+framework_v5/framework.chunks/
+# Session scratch
+_qc_*
+_font_test.woff2

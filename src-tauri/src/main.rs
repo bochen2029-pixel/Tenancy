@@ -18,7 +18,7 @@ mod think_strip;
 mod time_awareness;
 
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 use tokio::process::Child;
 use tokio::sync::oneshot;
@@ -38,6 +38,14 @@ pub struct AppState {
     /// Without this, an outreach fire that completes while the chat path is
     /// mid-stream produces interleaved garbage in the conversation pane.
     pub chat_in_flight: Arc<AtomicBool>,
+    /// Live system prompt cache. Initialized at startup from the
+    /// `active_system_prompt` DB setting (or `prompts::SYSTEM_PROMPT` when
+    /// empty/missing) and hot-swappable via the persona commands. Every
+    /// callsite that previously referenced `prompts::SYSTEM_PROMPT`
+    /// directly now read-locks this and clones the current value. Workers
+    /// (idle, outreach, consolidation) hold their own `Arc` to the same
+    /// `RwLock`, so swaps propagate to them without a respawn.
+    pub system_prompt: Arc<RwLock<String>>,
 }
 
 fn main() {
@@ -95,30 +103,92 @@ fn main() {
             commands::get_memory_canvas,
             commands::set_memory_canvas,
             commands::edit_message_content,
+            commands::list_models,
+            commands::get_active_model,
+            commands::get_thinking_enabled,
+            commands::set_thinking_enabled,
+            commands::switch_model,
+            commands::list_personas,
+            commands::get_default_system_prompt,
+            commands::load_persona_text,
+            commands::get_system_prompt,
+            commands::set_system_prompt,
+            commands::reset_system_prompt,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
 async fn init(app: AppHandle) -> anyhow::Result<()> {
-    let child = sidecar::spawn_llama_server(&app).await?;
-
-    let db_path = sidecar::dave_data_dir(&app)?.join("dave.db");
+    // DB has to come up before the sidecar now — the sidecar reads its
+    // active-model-path + thinking-enabled settings from the DB on spawn.
+    let data_dir = sidecar::dave_data_dir(&app)?;
+    let db_path = data_dir.join("dave.db");
     let db = persistence::open(&db_path)?;
     persistence::touch_app_open(&db).await?;
+
+    // Rotating disaster-recovery backup of the DB (keeps the last few snapshots
+    // in <data_dir>/backups/ via VACUUM INTO — each a fully-checkpointed single
+    // file). Best-effort, runs once before the session writes anything, so a
+    // corruption or accidental wipe never costs more than the last session.
+    persistence::rotate_backup(&db, &data_dir);
+
+    // Seed the portable personas dir (release: %LOCALAPPDATA%\...\personas)
+    // with an editable example so preset personas work on a bare machine.
+    prompts::seed_personas();
+
+    // Boot-time GGUF inventory — logs every available model so we can
+    // confirm in dev.log that the running binary sees C:\models. If
+    // the dropdown is later empty, this log line tells us whether the
+    // problem is path/permissions (here) or IPC plumbing (frontend).
+    let inventory = sidecar::list_available_models();
+    tracing::info!("boot inventory: {} GGUF(s) discoverable", inventory.len());
+    for p in &inventory {
+        tracing::info!("  GGUF: {}", p.display());
+    }
+
+    let child = sidecar::spawn_llama_server(&app, &db).await?;
 
     let client = Arc::new(llama_client::LlamaClient::new("http://127.0.0.1:8080"));
 
     let chat_in_flight = Arc::new(AtomicBool::new(false));
 
-    let idle_tx = idle_worker::spawn(app.clone(), db.clone(), client.clone());
+    // Resolve the live system prompt now (DB setting overrides the in-binary
+    // default). One-time read at boot; after this, every read goes through
+    // the Arc<RwLock<String>> below — no DB hit on the hot path. Logged so
+    // dev.log shows whether the active prompt is the built-in or a swap.
+    let initial_prompt = prompts::resolve_active_system_prompt(&db).await;
+    let prompt_source = if initial_prompt == prompts::SYSTEM_PROMPT {
+        "built-in default"
+    } else {
+        "DB override"
+    };
+    tracing::info!(
+        "boot persona: {} ({} chars)",
+        prompt_source,
+        initial_prompt.chars().count()
+    );
+    let system_prompt = Arc::new(RwLock::new(initial_prompt));
+
+    let idle_tx = idle_worker::spawn(
+        app.clone(),
+        db.clone(),
+        client.clone(),
+        system_prompt.clone(),
+    );
     let outreach_tx = outreach::spawn(
         app.clone(),
         db.clone(),
         client.clone(),
         chat_in_flight.clone(),
+        system_prompt.clone(),
     );
-    let consolidation_tx = consolidation::spawn(app.clone(), db.clone(), client.clone());
+    let consolidation_tx = consolidation::spawn(
+        app.clone(),
+        db.clone(),
+        client.clone(),
+        system_prompt.clone(),
+    );
 
     app.manage(AppState {
         db,
@@ -128,6 +198,7 @@ async fn init(app: AppHandle) -> anyhow::Result<()> {
         outreach_shutdown: Mutex::new(Some(outreach_tx)),
         consolidation_shutdown: Mutex::new(Some(consolidation_tx)),
         chat_in_flight,
+        system_prompt,
     });
 
     let _ = app.emit("dave:ready", ());
@@ -144,14 +215,25 @@ async fn handle_close(app: AppHandle) {
         let outreach = state.outreach_shutdown.lock().unwrap().take();
         let consolidation = state.consolidation_shutdown.lock().unwrap().take();
         let child = state.llama_child.lock().unwrap().take();
-        (state.client.clone(), state.db.clone(), idle, outreach, consolidation, child)
+        // Snapshot the live persona so the departure ritual fires with
+        // whatever the operator has selected, not the in-binary default.
+        let sys_prompt = state.system_prompt.read().unwrap().clone();
+        (
+            state.client.clone(),
+            state.db.clone(),
+            idle,
+            outreach,
+            consolidation,
+            child,
+            sys_prompt,
+        )
     };
-    let (client, db, idle_shutdown, outreach_shutdown, consolidation_shutdown, llama_child) = extracted;
+    let (client, db, idle_shutdown, outreach_shutdown, consolidation_shutdown, llama_child, sys_prompt) = extracted;
 
     let messages = vec![
         llama_client::ChatMessage {
             role: "system".into(),
-            content: prompts::SYSTEM_PROMPT.into(),
+            content: sys_prompt,
         },
         llama_client::ChatMessage {
             role: "user".into(),
@@ -187,6 +269,10 @@ async fn handle_close(app: AppHandle) {
     if let Some(mut child) = llama_child {
         let _ = child.start_kill();
     }
+
+    // Fold the WAL back into dave.db so the main file is self-contained on
+    // disk after a clean close (makes external copies / the next backup whole).
+    persistence::checkpoint_wal(&db);
 
     app.exit(0);
 }

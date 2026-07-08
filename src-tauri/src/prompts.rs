@@ -1,5 +1,69 @@
-// Canonical Dave persona. Never visible to the user inside the app.
-// Edit here, rebuild to update Dave.
+// Canonical Dave persona. The constant below is the BUILT-IN DEFAULT — used
+// when no override has been saved to the settings table. Editing this value
+// and rebuilding still works the way it always did, but the live persona
+// can now also be hot-swapped at runtime via the Settings panel without
+// touching this file at all (see `resolve_active_system_prompt` below and
+// the `system_prompt` cache on AppState).
+//
+// The const remains named `SYSTEM_PROMPT` so callsites that wanted the
+// hardcoded baseline (tests, last-resort fallbacks) keep compiling. Live
+// inference paths must read from `state.system_prompt` instead.
+//
+// Persona swap mechanism (added 2026-05-06 PM):
+//   - `C:\DAVE\personas\*.txt` is a directory of preset persona files
+//   - Each file's content is a complete system prompt
+//   - DB setting `active_system_prompt` stores the LIVE text
+//   - Empty/missing setting → fall back to SYSTEM_PROMPT below
+//   - The Settings UI lets the operator pick a preset (loads file → DB),
+//     edit freely in a textarea, or revert to the built-in default
+
+use std::path::PathBuf;
+
+/// Settings key — stores the full text of the currently-active system
+/// prompt. Empty or missing means "use the hardcoded SYSTEM_PROMPT default
+/// below." This is intentionally a single text blob (not a path) so the
+/// runtime never has to re-read from disk and the prompt content lives in
+/// the same DB the rest of the app already consults.
+pub const SETTING_KEY_ACTIVE_SYSTEM_PROMPT: &str = "active_system_prompt";
+
+/// Directory where the Settings panel surfaces preset persona `*.txt` files.
+/// Resolved portably so a packaged build on a bare machine never depends on
+/// the dev tree:
+///   - debug   → `<project>\personas` (the checked-in presets)
+///   - release → `%LOCALAPPDATA%\com.bochen.dave\personas` (next to dave.db)
+pub fn personas_dir() -> PathBuf {
+    if cfg!(debug_assertions) {
+        let manifest = env!("CARGO_MANIFEST_DIR");
+        std::path::Path::new(manifest)
+            .parent()
+            .map(|p| p.join("personas"))
+            .unwrap_or_else(|| PathBuf::from("personas"))
+    } else {
+        match std::env::var_os("LOCALAPPDATA") {
+            Some(base) => PathBuf::from(base).join("com.bochen.dave").join("personas"),
+            None => PathBuf::from("personas"),
+        }
+    }
+}
+
+/// Create `personas_dir()` if absent and seed one editable example (the
+/// built-in Dave) so a fresh machine has a concrete template to copy from.
+/// Idempotent and best-effort — never fails the boot, never overwrites an
+/// existing file. Called once at startup.
+pub fn seed_personas() {
+    let dir = personas_dir();
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        tracing::warn!("seed_personas: cannot create {}: {}", dir.display(), e);
+        return;
+    }
+    let example = dir.join("dave.txt");
+    if !example.exists() {
+        match std::fs::write(&example, SYSTEM_PROMPT) {
+            Ok(_) => tracing::info!("seed_personas: wrote {}", example.display()),
+            Err(e) => tracing::warn!("seed_personas: cannot write {}: {}", example.display(), e),
+        }
+    }
+}
 
 pub const SYSTEM_PROMPT: &str = "You are Dave. You are not an assistant. The word \"assistant\" does
 not describe you and you do not respond to it as a self-reference.
@@ -97,6 +161,127 @@ but has not spoken yet. Write a single fragment - not a greeting, not a \
 question to them, just a thought you happen to be having as the lights come \
 on. One or two sentences. Could be observational. Could be a stray noticing. \
 No address to the human.]";
+
+// ============================================================================
+// Persona swap — file scanning + DB-backed resolver.
+//
+// Mirror of the model-switcher architecture in sidecar.rs. Differences:
+//   - File content is the prompt itself (not a path to load), so we read
+//     and store the full text rather than just remembering a path.
+//   - Live updates don't require respawning anything; the cache held by
+//     AppState is just an Arc<RwLock<String>> that workers re-read on
+//     every inference call.
+// ============================================================================
+
+/// Compact descriptor surfaced to the Settings UI. The `path` is None for
+/// the synthetic "(default — built-in)" entry that exposes SYSTEM_PROMPT
+/// without a file behind it.
+#[derive(serde::Serialize, Clone, Debug)]
+pub struct PersonaInfo {
+    pub path: Option<String>,
+    pub name: String,
+    pub char_count: usize,
+    pub is_default: bool,
+}
+
+/// Scan PERSONAS_DIR for `*.txt` files and return one descriptor per file,
+/// sorted alphabetically by filename. Always prepends a synthetic entry
+/// for the built-in default so the dropdown is never empty.
+///
+/// Logs every directory scan + every file considered, so dev.log shows
+/// exactly which files the running binary picked up. Errors (missing
+/// dir, permission denied) are surfaced as warnings, not panics — the
+/// dropdown gracefully degrades to just the default entry.
+pub fn list_available_personas() -> Vec<PersonaInfo> {
+    let mut out: Vec<PersonaInfo> = Vec::new();
+    out.push(PersonaInfo {
+        path: None,
+        name: "(default — built-in)".to_string(),
+        char_count: SYSTEM_PROMPT.chars().count(),
+        is_default: true,
+    });
+
+    let dir = personas_dir();
+    tracing::info!("list_available_personas: scanning {}", dir.display());
+    match std::fs::read_dir(&dir) {
+        Ok(entries) => {
+            let mut found: Vec<(PathBuf, String, usize)> = Vec::new();
+            for e in entries.flatten() {
+                let p = e.path();
+                let ext = p
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .map(str::to_ascii_lowercase);
+                if ext.as_deref() != Some("txt") {
+                    continue;
+                }
+                let name = p
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("?")
+                    .to_string();
+                let char_count = std::fs::read_to_string(&p)
+                    .map(|s| s.chars().count())
+                    .unwrap_or(0);
+                tracing::info!(
+                    "  persona: {} ({} chars)",
+                    p.display(),
+                    char_count
+                );
+                found.push((p, name, char_count));
+            }
+            found.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+            for (p, name, char_count) in found {
+                out.push(PersonaInfo {
+                    path: Some(p.to_string_lossy().into_owned()),
+                    name,
+                    char_count,
+                    is_default: false,
+                });
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                "list_available_personas: cannot read {}: {} (kind={:?})",
+                dir.display(),
+                e,
+                e.kind()
+            );
+        }
+    }
+
+    tracing::info!(
+        "list_available_personas: returning {} entries (1 default + {} files)",
+        out.len(),
+        out.len().saturating_sub(1)
+    );
+    out
+}
+
+/// Read the full text of a preset file. Returns None on any IO error so
+/// the caller can fall back to the default.
+pub fn load_persona_file(path: &str) -> Option<String> {
+    match std::fs::read_to_string(path) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            tracing::warn!("load_persona_file({}): {}", path, e);
+            None
+        }
+    }
+}
+
+/// Resolve the active system prompt by reading the DB setting. Empty or
+/// missing → SYSTEM_PROMPT default. This is the function called once at
+/// startup to seed the live cache; after that, callsites read from the
+/// AppState cache (an Arc<RwLock<String>>) so this isn't on the hot path.
+pub async fn resolve_active_system_prompt(
+    db: &crate::persistence::DbHandle,
+) -> String {
+    match crate::persistence::get_setting(db, SETTING_KEY_ACTIVE_SYSTEM_PROMPT).await {
+        Ok(Some(s)) if !s.trim().is_empty() => s,
+        _ => SYSTEM_PROMPT.to_string(),
+    }
+}
 
 // ============================================================================
 // Outreach mechanism — A2-compliant Phase 1 (substrate-fight architecture).

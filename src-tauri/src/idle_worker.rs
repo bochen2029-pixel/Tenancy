@@ -1,6 +1,6 @@
 use chrono::{Local, Utc};
 use rand::Rng;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
 use tokio::time::{sleep, Duration};
@@ -14,7 +14,12 @@ const IDLE_THRESHOLD_SECONDS: i64 = 3 * 3600;
 const MIN_TICK_SECONDS: u64 = 2 * 3600;
 const MAX_TICK_SECONDS: u64 = 8 * 3600;
 
-pub fn spawn(app: AppHandle, db: DbHandle, client: Arc<LlamaClient>) -> oneshot::Sender<()> {
+pub fn spawn(
+    app: AppHandle,
+    db: DbHandle,
+    client: Arc<LlamaClient>,
+    system_prompt: Arc<RwLock<String>>,
+) -> oneshot::Sender<()> {
     let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
 
     tauri::async_runtime::spawn(async move {
@@ -32,7 +37,7 @@ pub fn spawn(app: AppHandle, db: DbHandle, client: Arc<LlamaClient>) -> oneshot:
                 }
             }
 
-            if let Err(e) = check_and_generate(&app, &db, &client).await {
+            if let Err(e) = check_and_generate(&app, &db, &client, &system_prompt).await {
                 tracing::warn!("idle worker tick error: {}", e);
             }
         }
@@ -45,6 +50,7 @@ async fn check_and_generate(
     app: &AppHandle,
     db: &DbHandle,
     client: &LlamaClient,
+    system_prompt: &Arc<RwLock<String>>,
 ) -> anyhow::Result<()> {
     let presence = persistence::get_presence(db).await?;
     let now = Utc::now().timestamp();
@@ -61,10 +67,11 @@ async fn check_and_generate(
     let duration = harness::humanize_duration(elapsed);
 
     let prompt = prompts::idle_meta(&time_str, &day, &date, &duration);
+    let sys = system_prompt.read().unwrap().clone();
     let messages = vec![
         ChatMessage {
             role: "system".into(),
-            content: prompts::SYSTEM_PROMPT.into(),
+            content: sys,
         },
         ChatMessage {
             role: "user".into(),

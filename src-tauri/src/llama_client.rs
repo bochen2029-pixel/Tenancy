@@ -7,9 +7,15 @@ use std::time::Duration;
 
 use crate::think_strip::{strip_think, ThinkStripper};
 
-// Qwen3.5 emits <think>...</think> reasoning tokens by default.
-// For Dave's voice we want plain replies, no chain-of-thought theatre.
-// Flip to true if a future Dave needs reasoning surfaced.
+// Async single-shot generations (journal, departure, startup, outreach
+// decision, discriminator scoring) always run with thinking OFF: they want
+// Dave's plain voice, and their small token budgets can't afford a reasoning
+// preamble consuming the whole response. Only `complete()` pins this.
+//
+// The interactive `chat_stream()` path does NOT pin thinking per-request —
+// it lets the server-level `--chat-template-kwargs enable_thinking` (driven
+// by the Settings toggle, default off) govern, so the toggle is meaningful.
+// Either way any <think> block that appears is stripped by ThinkStripper.
 const ENABLE_THINKING: bool = false;
 
 #[derive(Debug, Clone, Serialize)]
@@ -96,10 +102,10 @@ impl LlamaClient {
             "top_p": 0.9,
             "top_k": 20,
             "repeat_penalty": 1.0,
-            "presence_penalty": 1.5,
-            "chat_template_kwargs": {
-                "enable_thinking": ENABLE_THINKING
-            }
+            "presence_penalty": 1.5
+            // NOTE: intentionally no per-request chat_template_kwargs here.
+            // Interactive chat honors the server-level enable_thinking (the
+            // Settings toggle). ThinkStripper cleans any <think> block.
         });
 
         let resp = self

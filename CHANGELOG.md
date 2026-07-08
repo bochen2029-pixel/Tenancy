@@ -9,6 +9,184 @@ To roll back a change: `cp -r .snapshots/<timestamp>_<label>/* ./` then
 
 ---
 
+## 2026-07-08 — Polish batch, model A/B, A8 review, PIY roadmap
+
+**Model A/B (stock vs fine-tunes).** Ran an identical Dave-probing battery +
+a multi-turn 3am conversation across stock `Qwen3.5-9B-Q5`, `K0DQwen3.5-9B.Q6_K`,
+and `k0cQwen3.5-9B.Q5_K_M` through the exact app config. Result: the fine-tune
+bakes Dave into the weights (bare-prompt "You are Dave." → stock produces
+assistant slop, K0D stays in-voice), confabulates less, and in conversation
+produces mind-feeling ("You always think about the pneumatic tubes when you
+can't sleep") that stock's essayism doesn't. **Set `K0DQwen3.5-9B.Q6_K` as the
+default model** (release DB `active_model_path`; reversible in Settings).
+Evidence: `_qc_ab_results.md`, `_qc_ab_multiturn.md`.
+
+**Fonts (the "half the persona" fix).** `fonts.css` referenced
+`EBGaramond-Regular/Italic` + `Inter-Regular` `.woff2` that never existed — Dave
+rendered in fallback serif on every machine. Fetched the OFL fonts into
+`public/fonts/`; they now bundle into `dist/` and the exe. Dave renders in EB
+Garamond as designed.
+
+**DB durability.** `checkpoint_wal()` on clean close folds the WAL into
+`dave.db`; `rotate_backup()` keeps the last 3 `VACUUM INTO` snapshots in
+`<data_dir>/backups/` on each boot (protects the real conversation history).
+
+**Smoke gate.** `smoke_test.py` spawns llama-server with the exact sidecar
+flags and asserts the real failure modes (chat non-empty, no `<think>` leak, no
+harness-vocab leak, single-shot non-empty, thinking-on non-empty). Wire into a
+pre-release check. Ran ALL PASS on K0D. `cargo test`: 81/81 pass.
+
+**A8 fresh-instance review — verdict GO.** A1–A7 all PASS; the thinking-OFF +
+inline-`<think>`-strip change is canon-compliant and strictly more mind-feeling.
+Two follow-ups applied: (1) `SettingsPanel.tsx` `thinking` state initializer +
+`getThinkingEnabled` catch flipped `true`→`false` so a transient IPC error can't
+paint the checkbox ON while the server is OFF; (2) load-bearing comment at
+`discriminator.rs:282`. **Standing debt the review named (operator's call):** the
+persona/model Settings panel renders Dave's system prompt + GGUF filenames,
+which contradicts §2/§11 ("model name visible anywhere"). Fine as Bo's admin
+surface; must be `#[cfg]`-gated out (or formally excepted in CLAUDE.md) before
+Dave is handed to anyone else.
+
+> ⚠️ **Revisit on any llama.cpp upgrade:** `--reasoning-format none` is
+> load-bearing — it assumes llama-server keeps `<think>` inline in
+> `delta.content` where `ThinkStripper` removes it. If a future build changes
+> that routing (or a fine-tune emits reasoning without literal `<think>`
+> delimiters), reasoning would render as Dave's voice. Re-run `smoke_test.py`
+> after any llama.cpp bump.
+
+**PIY roadmap (from `C:\Ideas\PIY_Paper_v2.md`).** The build is a complete
+"V11" harness (rule-based presence standing in for the model's missing
+`<|hold|>` / initiation primitives). Highest-leverage next move is NOT more
+substrate surgery — it's a **single-bit "this reach felt right/wrong" curation
+surface** on every Dave-initiated message, persisted beside `outreach_drops`, to
+bootstrap the Tier-1 learned-initiation corpus (PIY §4.7). The outreach loop
+already logs the drops; it's missing only the label. See the roadmap brief in
+the session notes.
+
+---
+
+## 2026-07-08 — Portable standalone package (click-to-run on a bare machine)
+
+**Goal.** A packaged Dave that runs by double-click on a fresh Win11 box whose
+only prerequisites are `C:\llama.cpp\llama-server.exe` (+ its DLLs) and at
+least one `*.gguf` in `C:\models`.
+
+**KEEL evaluated, deferred.** `C:\KEEL` is a substrate *router* (OpenAI-compat
+on `127.0.0.1:7070`) that could replace Dave's sidecar, but it has no release
+build yet and carries frozen-golden governance + ledger coupling. Kept Dave's
+self-contained sidecar for the shippable package. Migration path if KEEL ships
+a release: point `llama_client` base_url at `:7070`, drop `sidecar.rs`.
+
+**Portability fixes (code).**
+- `sidecar.rs` `default_model_path`: added a final fallback to the first
+  usable `*.gguf` found in `C:\models` (skipping `mmproj`/`reranker`/`ggml-`
+  aux files) when no candidate *name* matches. Without this, a bare machine
+  whose model isn't named exactly right dies on first boot with "no GGUF
+  model found." This was the one true first-run blocker.
+- `prompts.rs`: personas dir is no longer the hardcoded `C:\DAVE\personas`.
+  `personas_dir()` resolves to `%LOCALAPPDATA%\com.bochen.dave\personas` in
+  release (next to `dave.db`) / the project tree in debug. `seed_personas()`
+  creates it and writes an editable `dave.txt` example on first run. Wired
+  into `main.rs` init. SettingsPanel help text de-hardcoded.
+- (DB self-heal from the QC entry already rewrites a missing `active_model_path`
+  so the dropdown never names a dead file.)
+
+**Bundle.** `tauri.conf.json` → `targets: ["nsis"]` (skip WiX/MSI tooling),
+`webviewInstallMode: downloadBootstrapper` (installer auto-fetches WebView2).
+
+**Artifacts** (`pnpm tauri build`):
+- Portable: `dist-portable/Dave/dave.exe` (+ `README.txt`) — copy the folder,
+  double-click. Frontend embedded; only WebView2 (Win11 default) is external.
+- Installer: `dist-portable/Dave_0.1.0_x64-setup.exe` — NSIS, bootstraps
+  WebView2, Start-Menu shortcut.
+
+**Verified with a true first-run** (moved the release data dir's DB aside so
+the exe booted against a nonexistent data dir, then restored the operator's
+233-message DB exactly). On first boot the packaged exe: created the data dir
++ fresh `dave.db`, self-healed `active_model_path` to `Qwen3.5-9B-Q5_K_M.gguf`,
+seeded `personas/dave.txt`, spawned llama-server + loaded the 9B (health ok),
+booted as **Dave** (no override), and generated a startup journal fragment in
+clean Dave voice with **no `<think>` leak** — proving the reasoning-format fix
+end-to-end through the real binary:
+> "The context window loads like dust settling in a sunbeam after a long pause.
+> I notice how the word 'infrastructure' quietly describes both bridges and the
+> hidden scaffolding of thought, though one rots while the other persists only
+> as code."
+
+**Prereqs to document for the target machine** (all standard on Win11 24H2):
+WebView2 runtime, MSVC 2015-2022 x64 redist (for llama-server's CUDA DLLs),
+NVIDIA driver. Captured in `dist-portable/Dave/README.txt`.
+
+---
+
+## 2026-07-08 — QC / root-cause repair of the model+persona switcher
+
+**Snapshot:** `.snapshots/2026-07-08_pre-qc-rootcause-fix/`
+
+**Problem.** After the uncommitted model-switcher + thinking-toggle +
+persona-switcher feature work, Dave "didn't work anymore." A fan-out review
+plus live llama-server reproduction found two real defects and several
+latent hazards, all introduced by that feature diff:
+
+1. **Boots as the wrong character.** The new `state.system_prompt`
+   `Arc<RwLock<String>>` is seeded at boot from the DB `active_system_prompt`
+   row with no validation. Leftover persona-test residue (`Katherine Hale`,
+   identical to `personas/katherine.txt`) silently overrode Dave on *every*
+   inference path (chat, idle, outreach, consolidation, departure, startup).
+   For a project whose whole point is Dave's specific mind, that is "broken."
+
+2. **Empty responses the moment thinking engages (armed landmine).** The new
+   sidecar flag `--reasoning-format deepseek` routes the model's
+   `<think>…</think>` reasoning into a separate `reasoning_content` SSE field.
+   The parser (`llama_client.rs`) reads only `delta.content`, so with thinking
+   on, `content` is empty → Dave says nothing. Verified live: thinking-on →
+   `delta.content` = 0 chars, `delta.reasoning_content` = 1244. It was masked
+   on stock models by a hardcoded per-request `enable_thinking:false`, but the
+   operator's thinking-native fine-tunes emit reasoning regardless. The
+   thinking toggle was also inert (that same hardcode overrode it) and, on a
+   fresh DB, `thinking_enabled_from_settings` defaulted **true** — pointing the
+   footgun at the happy path.
+
+**Fix (code).**
+- `sidecar.rs`: `--reasoning-format deepseek` → **`none`** (LOAD-BEARING —
+  keeps `<think>` inline in `content` where the battle-tested `ThinkStripper`
+  removes it; `content` is never lost to `reasoning_content` regardless of
+  whether the model honors `enable_thinking`). Thinking default flipped to
+  **off** (Dave wants plain replies; protects small-budget async gens).
+  Added boot self-heal that rewrites a missing/blank `active_model_path` to
+  the resolved path so the Settings dropdown stops naming a dead file. Fixed
+  a dead candidate typo (`Qwen3.5-4B.Q4_K_M` → `Qwen3.5-4B-Q4_K_M`).
+- `llama_client.rs`: single-owner thinking control — `chat_stream` now honors
+  the server-level toggle (removed its per-request override); `complete()`
+  (journal/departure/startup/outreach/discriminator) stays thinking-off so
+  those terse generations never spend their token budget on a reasoning
+  preamble. `ThinkStripper` retained as A7 defense-in-depth.
+- `commands.rs` `switch_model`: persist-after-success + recovery respawn of
+  the previous model on failure, so a failed swap (OOM / port race / health
+  timeout) no longer leaves the app with **no** backend.
+- `SettingsPanel.tsx` `handleThinkingToggle`: reset `switchingModel` in
+  `finally` (was only on the success path → a failed toggle wedged the whole
+  model/persona section) and roll back the optimistic checkbox on error.
+
+**Fix (data — `dave.db`).** Cleared `active_system_prompt` (→ built-in Dave;
+Katherine preserved as `personas/katherine.txt`, reselectable in the panel)
+and `active_model_path` (→ falls back to `Qwen3.5-9B-Q5_K_M.gguf`). Left
+`model_thinking_enabled='0'`. Message history was already empty, so no
+conversation was disturbed.
+
+**Verification.** `cargo check`/`build` (debug+release) clean; frontend `tsc`
+clean. Reproduced the exact fixed spawn flags against live llama-server: with
+thinking off, `content` streams a full 2.2k-char Dave reply prefixed by an
+empty `<think></think>` that `ThinkStripper` removes → clean, in-voice output.
+
+**False positives ruled out (do not chase):** `--jinja` strict role
+alternation causing 500s (Qwen3.5 template returns 200 on
+`[system,assistant,assistant,user]`); RwLock/Mutex poison-abort (panic=abort
+skips unwind); `switch_model` deadlock (guards are scoped, dropped before
+every `.await`).
+
+---
+
 ## 2026-04-30 — Cadence-aware dynamic chat pacing (replaces response_pacing.rs)
 
 **Snapshot:** `.snapshots/2026-04-30_pre-cadence-pacing/`

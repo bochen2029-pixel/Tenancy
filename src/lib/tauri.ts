@@ -61,6 +61,25 @@ export type MiddleBlock =
   | { kind: 'epoch'; epoch: ConsolidationEpoch }
   | { kind: 'messages'; messages: Message[] };
 
+export type ModelInfo = {
+  path: string;
+  name: string;
+  size_bytes: number;
+  active: boolean;
+};
+
+export type PersonaInfo = {
+  /// Absolute path to the .txt file. `null` for the synthetic
+  /// "(default — built-in)" entry.
+  path: string | null;
+  /// Display label — file stem, or the built-in marker text.
+  name: string;
+  /// Char count of the file content (for showing a size hint in the UI).
+  char_count: number;
+  /// True only for the synthetic default entry.
+  is_default: boolean;
+};
+
 export type PartitionView = {
   conversation_id: number;
   system_prompt: string;
@@ -130,6 +149,28 @@ export const ipc = {
     invoke<void>('set_memory_canvas', { conversationId, content, reason }),
   editMessageContent: (conversationId: number, messageId: number, newContent: string, reason: string) =>
     invoke<void>('edit_message_content', { conversationId, messageId, newContent, reason }),
+
+  // Model lifecycle (settings UI). switch_model blocks until the new
+  // llama-server is /health-ready; expect 30-90s wait depending on size.
+  listModels: () => invoke<ModelInfo[]>('list_models'),
+  getActiveModel: () => invoke<string | null>('get_active_model'),
+  getThinkingEnabled: () => invoke<boolean>('get_thinking_enabled'),
+  setThinkingEnabled: (enabled: boolean) =>
+    invoke<void>('set_thinking_enabled', { enabled }),
+  switchModel: (path: string) =>
+    invoke<string>('switch_model', { path }),
+
+  // Persona lifecycle (settings UI). Hot-swap is real and synchronous —
+  // setSystemPrompt updates the live cache that every worker reads from,
+  // so the next inference uses the new prompt without any restart.
+  listPersonas: () => invoke<PersonaInfo[]>('list_personas'),
+  getDefaultSystemPrompt: () => invoke<string>('get_default_system_prompt'),
+  loadPersonaText: (path: string) =>
+    invoke<string>('load_persona_text', { path }),
+  getSystemPrompt: () => invoke<string>('get_system_prompt'),
+  setSystemPrompt: (text: string) =>
+    invoke<void>('set_system_prompt', { text }),
+  resetSystemPrompt: () => invoke<string>('reset_system_prompt'),
 };
 
 export type Unlisten = UnlistenFn;

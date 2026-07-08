@@ -1,6 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useDaveStore } from '../state/store';
-import { ipc, SETTING_KEY_OUTREACH_THRESHOLD } from '../lib/tauri';
+import {
+  ipc,
+  SETTING_KEY_OUTREACH_THRESHOLD,
+  type ModelInfo,
+  type PersonaInfo,
+} from '../lib/tauri';
+
+// Sentinel values used in the persona dropdown for the two non-file options.
+// "(default — built-in)" maps to the in-binary SYSTEM_PROMPT constant.
+// "(custom — edited below)" appears only when the textarea diverges from
+// every known preset.
+const PERSONA_DEFAULT_KEY = '__default__';
+const PERSONA_CUSTOM_KEY = '__custom__';
 
 // Hidden behind a gear icon in the StatusBar. Testing/admin surface — not
 // part of normal use. Adjusts the outreach idle threshold and provides
@@ -48,6 +60,43 @@ export function SettingsPanel() {
   const [pace, setPace] = useState<number>(PACE_DEFAULT_F);
   const [savingPace, setSavingPace] = useState(false);
 
+  // Model selector + thinking toggle. Hot-swap is real: switch_model
+  // kills the running llama-server and respawns. Expect a 30-90s wait
+  // for the larger models. Background workers (idle, outreach,
+  // consolidation) keep their LlamaClient pointed at 127.0.0.1:8080 —
+  // the port doesn't change, so they recover automatically once the
+  // new server is /health-ready.
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [activeModel, setActiveModel] = useState<string>('');
+  const [pendingModel, setPendingModel] = useState<string>('');
+  const [switchingModel, setSwitchingModel] = useState(false);
+  // Default OFF to match the backend canon default. A transient
+  // getThinkingEnabled() failure must not paint the checkbox ON (thinking-on
+  // is exactly the state the reasoning-format fix exists to prevent by accident).
+  const [thinking, setThinking] = useState<boolean>(false);
+  const [savingThinking, setSavingThinking] = useState(false);
+
+  // Persona swap state.
+  //
+  // `activePrompt`     = what the running backend cache currently holds
+  //                      (last value successfully sent through setSystemPrompt
+  //                      or the default at boot).
+  // `editingPrompt`    = the textarea's current content. May diverge from
+  //                      active until the user clicks apply.
+  // `defaultPrompt`    = the in-binary baseline, fetched once for the
+  //                      "(default — built-in)" dropdown option.
+  // `personas`         = preset descriptors (default sentinel + every
+  //                      *.txt file the backend found in C:\DAVE\personas\).
+  // `selectedPersona`  = the dropdown's selected key. One of:
+  //                      PERSONA_DEFAULT_KEY, PERSONA_CUSTOM_KEY, or a path.
+  const [personas, setPersonas] = useState<PersonaInfo[]>([]);
+  const [activePrompt, setActivePrompt] = useState<string>('');
+  const [editingPrompt, setEditingPrompt] = useState<string>('');
+  const [defaultPrompt, setDefaultPrompt] = useState<string>('');
+  const [selectedPersona, setSelectedPersona] = useState<string>(PERSONA_DEFAULT_KEY);
+  const [savingPersona, setSavingPersona] = useState(false);
+  const [resettingPersona, setResettingPersona] = useState(false);
+
   useEffect(() => {
     if (!open) return;
     setLastResult(null);
@@ -79,6 +128,68 @@ export function SettingsPanel() {
         }
       })
       .catch(() => {});
+    // Models + active path + thinking-enabled.
+    // Errors are surfaced to lastResult so we can see if the IPC command
+    // is missing (likely an old dev-binary issue) vs. an empty C:\models.
+    ipc
+      .listModels()
+      .then((m) => {
+        setModels(m);
+        if (m.length === 0) {
+          setLastResult('listModels returned 0 entries — check C:\\models exists');
+        }
+      })
+      .catch((e) => {
+        console.error('listModels failed:', e);
+        setModels([]);
+        setLastResult(`listModels error: ${String(e).slice(0, 200)}`);
+      });
+    ipc
+      .getActiveModel()
+      .then((p) => setActiveModel(p || ''))
+      .catch((e) => {
+        console.error('getActiveModel failed:', e);
+        setActiveModel('');
+      });
+    ipc
+      .getThinkingEnabled()
+      .then(setThinking)
+      .catch((e) => {
+        console.error('getThinkingEnabled failed:', e);
+        setThinking(false);
+      });
+
+    // Persona section — pull the four pieces in parallel:
+    //   1) preset list (default + files)
+    //   2) the in-binary default text (for the "(default)" option preview)
+    //   3) the live active prompt (textarea seed)
+    // If any fails, surface to lastResult so the cause is visible (most
+    // likely a stale binary missing the new commands).
+    Promise.all([
+      ipc.listPersonas(),
+      ipc.getDefaultSystemPrompt(),
+      ipc.getSystemPrompt(),
+    ])
+      .then(([list, def, active]) => {
+        setPersonas(list);
+        setDefaultPrompt(def);
+        setActivePrompt(active);
+        setEditingPrompt(active);
+        // Pick the dropdown selection that matches the current active text.
+        // Match priority: default first, then any preset whose content equals
+        // active, else "custom".
+        if (active === def) {
+          setSelectedPersona(PERSONA_DEFAULT_KEY);
+        } else {
+          // We have to fetch each file's content to compare; defer that to
+          // when the user opens the dropdown. Default to "custom" for now.
+          setSelectedPersona(PERSONA_CUSTOM_KEY);
+        }
+      })
+      .catch((e) => {
+        console.error('persona load failed:', e);
+        setLastResult(`persona load error: ${String(e).slice(0, 200)}`);
+      });
   }, [open]);
 
   async function handleTriageForceChange(v: string) {
@@ -102,6 +213,142 @@ export function SettingsPanel() {
       console.error('save pace failed:', e);
     } finally {
       setSavingPace(false);
+    }
+  }
+
+  function fmtSize(bytes: number): string {
+    if (!bytes) return '';
+    const gb = bytes / (1024 * 1024 * 1024);
+    if (gb >= 1) return `${gb.toFixed(1)} GB`;
+    const mb = bytes / (1024 * 1024);
+    return `${mb.toFixed(0)} MB`;
+  }
+
+  async function handleApplyModel() {
+    const target = pendingModel || activeModel;
+    if (!target || target === activeModel) return;
+    setSwitchingModel(true);
+    setLastResult(null);
+    try {
+      const loaded = await ipc.switchModel(target);
+      setActiveModel(loaded);
+      setPendingModel('');
+      // refresh list to update `active` flags
+      const fresh = await ipc.listModels();
+      setModels(fresh);
+      const name = loaded.split(/[\\/]/).pop() || loaded;
+      setLastResult(`Loaded: ${name}`);
+    } catch (e) {
+      setLastResult(`Switch failed: ${e}`);
+    } finally {
+      setSwitchingModel(false);
+    }
+  }
+
+  async function handleThinkingToggle(next: boolean) {
+    setThinking(next);
+    setSavingThinking(true);
+    try {
+      await ipc.setThinkingEnabled(next);
+      // The flag is read at the next spawn — to apply now, we must
+      // re-spawn with the same model. switch_model with the active
+      // path does that.
+      if (activeModel) {
+        setSwitchingModel(true);
+        const loaded = await ipc.switchModel(activeModel);
+        setActiveModel(loaded);
+        setLastResult(
+          `Thinking ${next ? 'enabled' : 'disabled'} (server restarted).`
+        );
+      } else {
+        setLastResult(
+          `Thinking ${next ? 'enabled' : 'disabled'} (will apply on next spawn).`
+        );
+      }
+    } catch (e) {
+      // Roll the optimistic checkbox back — the server did not actually change.
+      setThinking(!next);
+      setLastResult(`Thinking toggle failed: ${e}`);
+    } finally {
+      // Reset BOTH flags here. Previously setSwitchingModel(false) lived only
+      // on the success path, so a failed switchModel wedged the entire
+      // model/persona section (every control is disabled while switching).
+      setSavingThinking(false);
+      setSwitchingModel(false);
+    }
+  }
+
+  // Persona dropdown change — load the selected preset's text into the
+  // textarea (preview only, not saved). Picking "(custom)" leaves the
+  // textarea alone (the user is mid-edit).
+  async function handlePersonaSelect(key: string) {
+    setSelectedPersona(key);
+    setLastResult(null);
+    if (key === PERSONA_CUSTOM_KEY) {
+      // No-op — keep current textarea content.
+      return;
+    }
+    if (key === PERSONA_DEFAULT_KEY) {
+      setEditingPrompt(defaultPrompt);
+      return;
+    }
+    // It's a file path — fetch content.
+    try {
+      const text = await ipc.loadPersonaText(key);
+      setEditingPrompt(text);
+    } catch (e) {
+      setLastResult(`Load persona failed: ${e}`);
+    }
+  }
+
+  // Apply the textarea content as the new live prompt. Persists to DB and
+  // updates the live cache; the next inference (chat / idle / outreach /
+  // consolidation / departure / startup) will use it.
+  async function handlePersonaApply() {
+    if (editingPrompt.trim() === '') {
+      setLastResult('Persona text cannot be empty (use "reset to default").');
+      return;
+    }
+    if (editingPrompt === activePrompt) {
+      setLastResult('No change — that prompt is already active.');
+      return;
+    }
+    setSavingPersona(true);
+    setLastResult(null);
+    try {
+      await ipc.setSystemPrompt(editingPrompt);
+      setActivePrompt(editingPrompt);
+      setLastResult(
+        `Persona applied (${editingPrompt.length} chars). Active on next message.`
+      );
+      // Update dropdown label: if textarea matches default, snap selector to default.
+      if (editingPrompt === defaultPrompt) {
+        setSelectedPersona(PERSONA_DEFAULT_KEY);
+      } else {
+        setSelectedPersona(PERSONA_CUSTOM_KEY);
+      }
+    } catch (e) {
+      setLastResult(`Persona apply failed: ${e}`);
+    } finally {
+      setSavingPersona(false);
+    }
+  }
+
+  // Revert to the in-binary default. Clears the DB override and reseats
+  // the cache. Useful when a custom prompt is misbehaving.
+  async function handlePersonaReset() {
+    setResettingPersona(true);
+    setLastResult(null);
+    try {
+      const restored = await ipc.resetSystemPrompt();
+      setActivePrompt(restored);
+      setEditingPrompt(restored);
+      setSelectedPersona(PERSONA_DEFAULT_KEY);
+      setLastResult('Reverted to built-in default.');
+    } catch (e) {
+      setLastResult(`Reset failed: ${e}`);
+    } finally {
+      setResettingPersona(false);
     }
   }
 
@@ -182,6 +429,226 @@ export function SettingsPanel() {
       >
         <div className="status-bar mb-8" style={{ opacity: 0.6 }}>
           settings
+        </div>
+
+        {/* Model — hot-swap the loaded GGUF + thinking-mode toggle */}
+        <div className="mb-10">
+          <div
+            className="status-bar mb-2"
+            style={{ color: 'var(--text-secondary)', textTransform: 'none' }}
+          >
+            model
+          </div>
+          <div
+            className="status-bar mb-3"
+            style={{ opacity: 0.5, fontSize: 11, textTransform: 'none' }}
+          >
+            switch the loaded GGUF. apply restarts llama-server (~30-90s).
+            background workers (idle, outreach, consolidation) reconnect
+            automatically.
+          </div>
+          <select
+            value={pendingModel || activeModel}
+            onChange={(e) => setPendingModel(e.target.value)}
+            disabled={switchingModel || savingThinking}
+            className="settings-button"
+            style={{ width: '100%', marginBottom: 8 }}
+          >
+            {models.length === 0 && (
+              <option value="">(no .gguf files found in C:\models)</option>
+            )}
+            {models.map((m) => {
+              const sz = fmtSize(m.size_bytes);
+              const label = sz ? `${m.name} (${sz})` : m.name;
+              return (
+                <option key={m.path} value={m.path}>
+                  {m.active ? '● ' : '   '}
+                  {label}
+                </option>
+              );
+            })}
+          </select>
+          <button
+            className="settings-button"
+            onClick={handleApplyModel}
+            disabled={
+              switchingModel ||
+              savingThinking ||
+              !pendingModel ||
+              pendingModel === activeModel
+            }
+            style={{ width: '100%' }}
+          >
+            {switchingModel
+              ? 'restarting llama-server…'
+              : pendingModel && pendingModel !== activeModel
+              ? 'apply'
+              : 'apply (no change)'}
+          </button>
+          <label
+            className="status-bar"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              marginTop: 12,
+              textTransform: 'none',
+              cursor: savingThinking || switchingModel ? 'wait' : 'pointer',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={thinking}
+              disabled={savingThinking || switchingModel}
+              onChange={(e) => handleThinkingToggle(e.target.checked)}
+            />
+            <span style={{ color: 'var(--text-primary)' }}>
+              thinking enabled
+            </span>
+            <span style={{ opacity: 0.5, fontSize: 11 }}>
+              (Qwen3.5 small variants ship with thinking off — toggle
+              applies on restart)
+            </span>
+          </label>
+          {activeModel && (
+            <div
+              className="status-bar"
+              style={{
+                opacity: 0.4,
+                fontSize: 10,
+                textTransform: 'none',
+                marginTop: 8,
+                wordBreak: 'break-all',
+              }}
+            >
+              active: {activeModel.split(/[\\/]/).pop()}
+            </div>
+          )}
+        </div>
+
+        {/* Persona — hot-swap the system prompt that defines Dave's voice.
+            The dropdown previews preset .txt files from C:\DAVE\personas\;
+            the textarea is editable and is what actually gets applied. No
+            restart needed — the change takes effect on the next message. */}
+        <div className="mb-10">
+          <div
+            className="status-bar mb-2"
+            style={{ color: 'var(--text-secondary)', textTransform: 'none' }}
+          >
+            persona
+          </div>
+          <div
+            className="status-bar mb-3"
+            style={{ opacity: 0.5, fontSize: 11, textTransform: 'none' }}
+          >
+            swap the system prompt. selecting a preset previews it below;
+            apply makes it live. takes effect on the next message — chat,
+            idle worker, outreach, consolidation, departure, startup all
+            read from the same cache. drop new presets as *.txt in the
+            app's personas folder and reopen this panel to pick them up.
+          </div>
+          <select
+            value={selectedPersona}
+            onChange={(e) => handlePersonaSelect(e.target.value)}
+            disabled={savingPersona || resettingPersona}
+            className="settings-button"
+            style={{ width: '100%', marginBottom: 8 }}
+          >
+            <option value={PERSONA_DEFAULT_KEY}>
+              {selectedPersona === PERSONA_DEFAULT_KEY &&
+              activePrompt === defaultPrompt
+                ? '● '
+                : '   '}
+              (default — built-in) ({defaultPrompt.length} chars)
+            </option>
+            <option value={PERSONA_CUSTOM_KEY}>
+              {selectedPersona === PERSONA_CUSTOM_KEY ? '● ' : '   '}
+              (custom — edited below)
+            </option>
+            {personas
+              .filter((p) => !p.is_default && p.path)
+              .map((p) => (
+                <option key={p.path!} value={p.path!}>
+                  {selectedPersona === p.path ? '● ' : '   '}
+                  {p.name} ({p.char_count} chars)
+                </option>
+              ))}
+          </select>
+          <textarea
+            value={editingPrompt}
+            onChange={(e) => {
+              setEditingPrompt(e.target.value);
+              // Any edit means "custom" unless it happens to match a known
+              // option exactly. Keep dropdown honest.
+              if (e.target.value === defaultPrompt) {
+                setSelectedPersona(PERSONA_DEFAULT_KEY);
+              } else {
+                setSelectedPersona(PERSONA_CUSTOM_KEY);
+              }
+            }}
+            disabled={savingPersona || resettingPersona}
+            spellCheck={false}
+            style={{
+              width: '100%',
+              minHeight: 220,
+              maxHeight: 420,
+              resize: 'vertical',
+              fontFamily:
+                'ui-monospace, "Cascadia Mono", "Consolas", monospace',
+              fontSize: 11,
+              lineHeight: 1.5,
+              padding: 8,
+              backgroundColor: 'var(--bg-base)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border-medium)',
+              borderRadius: 2,
+              marginBottom: 8,
+            }}
+          />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              className="settings-button"
+              onClick={handlePersonaApply}
+              disabled={
+                savingPersona ||
+                resettingPersona ||
+                editingPrompt.trim() === '' ||
+                editingPrompt === activePrompt
+              }
+              style={{ flex: 1 }}
+            >
+              {savingPersona
+                ? 'applying…'
+                : editingPrompt === activePrompt
+                ? 'apply (no change)'
+                : `apply (${editingPrompt.length} chars)`}
+            </button>
+            <button
+              className="settings-button"
+              onClick={handlePersonaReset}
+              disabled={savingPersona || resettingPersona}
+              style={{ flex: 1 }}
+              title="Clear the override. Reverts to the SYSTEM_PROMPT constant baked into the binary."
+            >
+              {resettingPersona ? 'resetting…' : 'reset to default'}
+            </button>
+          </div>
+          <div
+            className="status-bar"
+            style={{
+              opacity: 0.4,
+              fontSize: 10,
+              textTransform: 'none',
+              marginTop: 8,
+            }}
+          >
+            active: {activePrompt.length} chars
+            {activePrompt !== editingPrompt && (
+              <span style={{ color: '#d7826b', marginLeft: 8 }}>
+                (textarea has unsaved edits)
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Outreach threshold */}

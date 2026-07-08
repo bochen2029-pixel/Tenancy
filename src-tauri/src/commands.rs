@@ -1,6 +1,6 @@
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tauri::{AppHandle, Emitter, State};
 
 use chrono::Local;
@@ -50,6 +50,7 @@ pub(crate) async fn fire_deferred_pending(
     db: crate::persistence::DbHandle,
     client: Arc<crate::llama_client::LlamaClient>,
     chat_in_flight: Arc<AtomicBool>,
+    system_prompt: Arc<RwLock<String>>,
     pending_id: i64,
 ) {
     // Atomic claim. Only one caller wins; the other sees fired=1 and bails.
@@ -110,6 +111,7 @@ pub(crate) async fn fire_deferred_pending(
         &db,
         client.as_ref(),
         &chat_in_flight,
+        &system_prompt,
         pending.conversation_id,
         &user_msg.content,
         &recent_msgs,
@@ -345,6 +347,7 @@ pub async fn send_to_dave(
                 &state.db,
                 state.client.as_ref(),
                 &state.chat_in_flight,
+                &state.system_prompt,
                 conversation_id,
                 &user_text,
                 &recent_for_triage,
@@ -388,6 +391,7 @@ pub async fn send_to_dave(
             let db_clone = state.db.clone();
             let client_clone = state.client.clone();
             let chat_in_flight_clone = state.chat_in_flight.clone();
+            let system_prompt_clone = state.system_prompt.clone();
             tokio::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(seconds)).await;
                 fire_deferred_pending(
@@ -395,6 +399,7 @@ pub async fn send_to_dave(
                     db_clone,
                     client_clone,
                     chat_in_flight_clone,
+                    system_prompt_clone,
                     pending_id,
                 )
                 .await;
@@ -442,6 +447,7 @@ pub(crate) async fn run_chat_inference_and_emit(
     db: &crate::persistence::DbHandle,
     client: &crate::llama_client::LlamaClient,
     chat_in_flight: &Arc<AtomicBool>,
+    system_prompt: &Arc<RwLock<String>>,
     conversation_id: i64,
     user_text: &str,
     recent_msgs: &[Message],
@@ -468,11 +474,16 @@ pub(crate) async fn run_chat_inference_and_emit(
     // Conditional time-awareness: if the user's message reaches for time,
     // prepend a single ambient sentence to the system prompt for THIS
     // request only. Persistent context stays clean.
+    //
+    // The base prompt is read live from the AppState cache so persona swaps
+    // (Settings → model section) propagate to the next chat turn without a
+    // restart. Hold the read lock only long enough to clone.
+    let base_prompt = system_prompt.read().unwrap().clone();
     let system_content = if time_awareness::user_message_invokes_time(user_text) {
         let now = Local::now();
-        time_awareness::system_prompt_with_time(prompts::SYSTEM_PROMPT, &now)
+        time_awareness::system_prompt_with_time(&base_prompt, &now)
     } else {
-        prompts::SYSTEM_PROMPT.to_string()
+        base_prompt
     };
 
     // user_text is already in partition.recent (persisted earlier in
@@ -673,10 +684,11 @@ pub async fn ensure_startup_entry(
         return Ok(None);
     }
 
+    let sys = state.system_prompt.read().unwrap().clone();
     let messages = vec![
         ChatMessage {
             role: "system".into(),
-            content: prompts::SYSTEM_PROMPT.into(),
+            content: sys,
         },
         ChatMessage {
             role: "user".into(),
@@ -821,7 +833,7 @@ pub async fn load_partition_view(
 
     Ok(PartitionView {
         conversation_id,
-        system_prompt: prompts::SYSTEM_PROMPT.to_string(),
+        system_prompt: state.system_prompt.read().unwrap().clone(),
         anchor: part.anchor,
         canvas: part.canvas,
         middle,
@@ -961,6 +973,7 @@ pub async fn manual_consolidate_range(
         &app,
         &state.db,
         &state.client,
+        &state.system_prompt,
         conversation_id,
         range_start_message_id,
         range_end_message_id,
@@ -1097,4 +1110,297 @@ pub async fn export_database(app: AppHandle) -> Result<String, String> {
         return Err(format!("copy failed: {}", e));
     }
     Ok(dst.display().to_string())
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Model lifecycle commands — surface for the settings UI's model dropdown.
+//
+// Hot-swap design:
+//   1. Frontend calls switch_model(path) with an absolute *.gguf path.
+//   2. Backend persists the new path to settings (so it survives restart).
+//   3. Backend kills the running llama-server child (Mutex-take).
+//   4. Backend spawns a fresh llama-server pointed at the new model.
+//   5. wait_for_ready polls /health until the new server is up.
+//   6. The shared LlamaClient continues pointing at 127.0.0.1:8080 — the
+//      port doesn't change, so all downstream code (chat path, idle worker,
+//      outreach, consolidation) keeps working without restarting them.
+//
+// Background workers are NOT shut down during a model swap. They use the
+// same Arc<LlamaClient> that talks to the (new) server on the same port.
+// If a worker is mid-inference at the moment of swap, that inference will
+// fail with a connection error — they're written to tolerate this.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Info about a single available model file.
+#[derive(serde::Serialize)]
+pub struct ModelInfo {
+    /// Absolute path on disk.
+    pub path: String,
+    /// Filename without directory, suitable as a label.
+    pub name: String,
+    /// Size in bytes (best-effort; 0 if stat fails).
+    pub size_bytes: u64,
+    /// True if this is the model currently loaded into the running server.
+    pub active: bool,
+}
+
+#[tauri::command]
+pub async fn list_models(state: State<'_, AppState>) -> Result<Vec<ModelInfo>, String> {
+    let active = crate::sidecar::resolve_model_path(&state.db)
+        .await
+        .ok();
+    let active_str = active.as_ref().map(|p| p.to_string_lossy().to_string());
+
+    let paths = crate::sidecar::list_available_models();
+    let mut out = Vec::with_capacity(paths.len());
+    for p in paths {
+        let name = p.file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let size_bytes = std::fs::metadata(&p)
+            .map(|m| m.len())
+            .unwrap_or(0);
+        let path_str = p.to_string_lossy().to_string();
+        let active = active_str.as_deref() == Some(path_str.as_str());
+        out.push(ModelInfo {
+            path: path_str,
+            name,
+            size_bytes,
+            active,
+        });
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+pub async fn get_active_model(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    Ok(crate::sidecar::resolve_model_path(&state.db)
+        .await
+        .ok()
+        .map(|p| p.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+pub async fn get_thinking_enabled(state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(crate::sidecar::thinking_enabled_from_settings(&state.db).await)
+}
+
+/// Persist the thinking-enabled flag. Takes effect on the NEXT spawn —
+/// callers should follow with `switch_model(current)` or restart to pick
+/// up the change. The UI handles this by always doing thinking-toggle
+/// followed by a switch_model call.
+#[tauri::command]
+pub async fn set_thinking_enabled(
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<(), String> {
+    let v = if enabled { "1" } else { "0" };
+    crate::persistence::set_setting(&state.db, crate::sidecar::SETTING_KEY_THINKING_ENABLED, v)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Hot-swap the loaded model. Persists the new path, kills the running
+/// llama-server, and respawns. Blocks until the new server's /health
+/// endpoint reports ready (or 180s timeout).
+///
+/// Returns the absolute path that was loaded. Callers should disable any
+/// in-flight chat operations before invoking — the active LlamaClient may
+/// briefly fail HTTP calls during the swap window.
+#[tauri::command]
+pub async fn switch_model(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<String, String> {
+    let new_path = std::path::PathBuf::from(&path);
+    if !new_path.exists() {
+        return Err(format!("model file does not exist: {}", path));
+    }
+    if new_path.extension().and_then(|s| s.to_str()).map(str::to_ascii_lowercase)
+        != Some("gguf".to_string())
+    {
+        return Err(format!("not a .gguf file: {}", path));
+    }
+
+    // Capture the currently-loaded model BEFORE changing anything, so we can
+    // recover to it if the new model fails to come up. Port 8080 is shared,
+    // so we must stop the old server before starting the new one (a true
+    // spawn-before-kill would need a second port). This gives the next best
+    // guarantee: we do NOT persist the new path until the new server is
+    // actually /health-ready, and on failure we attempt to restore the
+    // previous server so the app is never left with no backend.
+    let prior_model = crate::sidecar::resolve_model_path(&state.db).await.ok();
+    let thinking = crate::sidecar::thinking_enabled_from_settings(&state.db).await;
+
+    // Stop the running child (mutex-take ensures only one swap at a time).
+    let prior_child = {
+        let mut guard = state.llama_child.lock().unwrap();
+        guard.take()
+    };
+    if let Some(mut child) = prior_child {
+        let _ = child.start_kill();
+        // Best-effort: wait briefly for the port to free up.
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await;
+    }
+
+    match crate::sidecar::spawn_llama_server_with(&app, &new_path, thinking).await {
+        Ok(new_child) => {
+            {
+                let mut guard = state.llama_child.lock().unwrap();
+                *guard = Some(new_child);
+            }
+            // Persist only after the new server is confirmed ready, so a
+            // failed swap never leaves a bad path that breaks the next boot.
+            crate::persistence::set_setting(
+                &state.db,
+                crate::sidecar::SETTING_KEY_MODEL_PATH,
+                &path,
+            )
+            .await
+            .map_err(|e| format!("persist model path: {}", e))?;
+            Ok(path)
+        }
+        Err(spawn_err) => {
+            // Recovery: try to bring the previous model back up.
+            if let Some(pm) = prior_model {
+                if let Ok(recovered) =
+                    crate::sidecar::spawn_llama_server_with(&app, &pm, thinking).await
+                {
+                    let mut guard = state.llama_child.lock().unwrap();
+                    *guard = Some(recovered);
+                    return Err(format!(
+                        "switch to {} failed: {} — restored previous model",
+                        path, spawn_err
+                    ));
+                }
+            }
+            Err(format!(
+                "switch to {} failed and previous model could not be restored: {}",
+                path, spawn_err
+            ))
+        }
+    }
+}
+
+// ============================================================================
+// Persona swap — Settings UI plumbing.
+//
+// The system prompt is no longer a baked-in constant from the binary's point
+// of view; it lives in `state.system_prompt: Arc<RwLock<String>>` and is
+// hot-swappable. These commands let the Settings panel:
+//   - enumerate preset .txt files in C:\DAVE\personas\
+//   - read one of those files into the textarea (load_persona_text)
+//   - read the in-binary default for the "(default — built-in)" entry
+//   - read the currently active prompt (get_system_prompt)
+//   - apply a new prompt (set_system_prompt) — persists to DB, updates cache,
+//     so the next inference (chat / idle / outreach / consolidation /
+//     departure / startup) uses it
+//   - reset to the in-binary default (reset_system_prompt) — clears the DB
+//     setting, reseats the cache to prompts::SYSTEM_PROMPT
+//
+// No process restart needed. Workers hold an Arc to the same RwLock and pick
+// up changes on their next read. The in-flight chat continues with whatever
+// it already cloned; persona swaps take effect on the *next* inference call.
+// ============================================================================
+
+/// Surface available personas (the synthetic "(default)" entry plus every
+/// `*.txt` file in `C:\DAVE\personas\`).
+#[tauri::command]
+pub async fn list_personas() -> Result<Vec<prompts::PersonaInfo>, String> {
+    Ok(prompts::list_available_personas())
+}
+
+/// Return the in-binary default prompt — the value the cache reverts to on
+/// `reset_system_prompt`. Frontend uses this to populate the textarea when
+/// the user picks "(default — built-in)" from the dropdown.
+#[tauri::command]
+pub async fn get_default_system_prompt() -> Result<String, String> {
+    Ok(prompts::SYSTEM_PROMPT.to_string())
+}
+
+/// Read the full text of a preset persona file. Errors only on IO failure.
+/// Frontend calls this when the dropdown selection changes to populate the
+/// textarea (separate from "apply" — preview-without-save).
+#[tauri::command]
+pub async fn load_persona_text(path: String) -> Result<String, String> {
+    prompts::load_persona_file(&path)
+        .ok_or_else(|| format!("could not read persona file: {}", path))
+}
+
+/// Return the currently-active system prompt text — what every inference
+/// path will use on its next call.
+#[tauri::command]
+pub async fn get_system_prompt(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(state.system_prompt.read().unwrap().clone())
+}
+
+/// Replace the live system prompt. Persists to DB so the change survives
+/// restart, then updates the in-memory cache so every worker sees it on
+/// the next read. Empty / whitespace-only text is rejected — to revert to
+/// the built-in default, call `reset_system_prompt` instead.
+///
+/// No restart, no respawn — the chat path, idle worker, outreach loop,
+/// consolidator, departure ritual, and startup fragment will all use the
+/// new prompt on their next inference. Already-in-flight inference uses
+/// whatever it cloned at start; this is fine because that's typically a
+/// single forward pass measured in seconds.
+#[tauri::command]
+pub async fn set_system_prompt(
+    state: State<'_, AppState>,
+    text: String,
+) -> Result<(), String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err("system prompt cannot be empty (use reset_system_prompt to revert to default)".into());
+    }
+
+    // Persist first so a crash between cache update and DB write doesn't
+    // leave us with a cache that lies.
+    persistence::set_setting(
+        &state.db,
+        prompts::SETTING_KEY_ACTIVE_SYSTEM_PROMPT,
+        &text,
+    )
+    .await
+    .map_err(|e| format!("persist system prompt: {}", e))?;
+
+    // Then update the cache. Workers see the new value on their next read.
+    {
+        let mut guard = state.system_prompt.write().unwrap();
+        *guard = text.clone();
+    }
+
+    tracing::info!(
+        "set_system_prompt: cache updated ({} chars)",
+        text.chars().count()
+    );
+
+    Ok(())
+}
+
+/// Revert to the built-in default. Clears the DB setting so future boots
+/// use the hardcoded constant, and reseats the cache immediately. Returns
+/// the new active text so the frontend can refresh its textarea without
+/// a follow-up call.
+#[tauri::command]
+pub async fn reset_system_prompt(
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    persistence::set_setting(
+        &state.db,
+        prompts::SETTING_KEY_ACTIVE_SYSTEM_PROMPT,
+        "",
+    )
+    .await
+    .map_err(|e| format!("clear system prompt setting: {}", e))?;
+
+    let default = prompts::SYSTEM_PROMPT.to_string();
+    {
+        let mut guard = state.system_prompt.write().unwrap();
+        *guard = default.clone();
+    }
+
+    tracing::info!("reset_system_prompt: reverted to in-binary default");
+    Ok(default)
 }

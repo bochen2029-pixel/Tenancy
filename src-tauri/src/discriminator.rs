@@ -279,6 +279,12 @@ pub async fn llm_score(client: &LlamaClient, text: &str) -> Result<u8> {
     ];
 
     // Single-token-ish completion with low temperature for determinism.
+    // LOAD-BEARING: the 4-token budget only works because complete() pins
+    // enable_thinking:false AND strip_think() runs on the result. If a future
+    // edit removes either, a <think> preamble would eat all 4 tokens,
+    // parse_score would return None, and outreach scoring would silently
+    // collapse (every candidate scored as error → Dave never reaches out).
+    // Do not "simplify" the thinking pin away without raising this budget.
     let response = client.complete(messages, 4, 0.1).await?;
 
     parse_score(&response).ok_or_else(|| anyhow!("could not parse score from: {:?}", response))

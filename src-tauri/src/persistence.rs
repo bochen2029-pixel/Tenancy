@@ -95,6 +95,47 @@ pub fn open(path: &Path) -> Result<DbHandle> {
     Ok(Arc::new(Mutex::new(conn)))
 }
 
+/// Checkpoint the WAL into the main db file. Called on clean shutdown so the
+/// main `dave.db` is self-contained — a plain file copy then captures the full
+/// state without needing the `-wal`/`-shm` sidecars. Best-effort.
+pub fn checkpoint_wal(db: &DbHandle) {
+    if let Ok(conn) = db.lock() {
+        let _ = conn.pragma_update(None, "wal_checkpoint", "TRUNCATE");
+    }
+}
+
+/// Rotating disaster-recovery backup. Keeps the last `KEEP` snapshots of the
+/// DB in `<data_dir>/backups/` using `VACUUM INTO`, which writes a fully
+/// checkpointed single-file copy (no WAL sidecar needed). Best-effort — logs
+/// and returns on any error rather than failing the boot. Intended to run once
+/// at startup, before the session writes, so a corruption or accidental wipe
+/// never costs more than the previous session's history.
+pub fn rotate_backup(db: &DbHandle, data_dir: &Path) {
+    const KEEP: usize = 3;
+    let dir = data_dir.join("backups");
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        tracing::warn!("rotate_backup: cannot create {}: {}", dir.display(), e);
+        return;
+    }
+    let slot = |i: usize| dir.join(format!("dave_backup_{}.db", i));
+    // Drop the oldest, shift the rest down (1->2, 2->3, ...).
+    let _ = std::fs::remove_file(slot(KEEP));
+    for i in (1..KEEP).rev() {
+        let _ = std::fs::rename(slot(i), slot(i + 1));
+    }
+    // VACUUM INTO requires the target not to exist.
+    let target = slot(1);
+    let _ = std::fs::remove_file(&target);
+    let sql = format!("VACUUM INTO '{}';", target.to_string_lossy().replace('\'', "''"));
+    match db.lock() {
+        Ok(conn) => match conn.execute_batch(&sql) {
+            Ok(_) => tracing::info!("rotate_backup: wrote {}", target.display()),
+            Err(e) => tracing::warn!("rotate_backup: VACUUM INTO failed: {}", e),
+        },
+        Err(_) => tracing::warn!("rotate_backup: db lock poisoned"),
+    }
+}
+
 fn init_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"

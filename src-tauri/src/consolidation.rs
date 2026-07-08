@@ -9,7 +9,7 @@
 // context, with a final non-bracketed instruction asking him to write a
 // memory passage. Output is in his voice; he authored his own memory.
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
 use tokio::time::{sleep, Duration};
@@ -20,6 +20,7 @@ use crate::memory_assembler::{
     estimate_tokens, ANCHOR_MESSAGE_COUNT, CONSOLIDATION_BATCH, RECENT_MESSAGE_TARGET,
 };
 use crate::persistence::{self, DbHandle, Message};
+#[allow(unused_imports)]
 use crate::prompts;
 
 const CONSOLIDATION_TICK_SECONDS: u64 = 300; // 5 min
@@ -44,7 +45,12 @@ older periods of this conversation. They need to compress further. Write a singl
 own voice that consolidates them into tighter prose. Aim for half their combined length. Preserve \
 what still feels important; let the rest go.";
 
-pub fn spawn(app: AppHandle, db: DbHandle, client: Arc<LlamaClient>) -> oneshot::Sender<()> {
+pub fn spawn(
+    app: AppHandle,
+    db: DbHandle,
+    client: Arc<LlamaClient>,
+    system_prompt: Arc<RwLock<String>>,
+) -> oneshot::Sender<()> {
     let (tx, mut rx) = oneshot::channel::<()>();
 
     tauri::async_runtime::spawn(async move {
@@ -61,7 +67,7 @@ pub fn spawn(app: AppHandle, db: DbHandle, client: Arc<LlamaClient>) -> oneshot:
                     return;
                 }
             }
-            if let Err(e) = tick(&app, &db, &client).await {
+            if let Err(e) = tick(&app, &db, &client, &system_prompt).await {
                 tracing::warn!("consolidation tick error: {}", e);
             }
         }
@@ -70,7 +76,12 @@ pub fn spawn(app: AppHandle, db: DbHandle, client: Arc<LlamaClient>) -> oneshot:
     tx
 }
 
-async fn tick(app: &AppHandle, db: &DbHandle, client: &LlamaClient) -> anyhow::Result<()> {
+async fn tick(
+    app: &AppHandle,
+    db: &DbHandle,
+    client: &LlamaClient,
+    system_prompt: &Arc<RwLock<String>>,
+) -> anyhow::Result<()> {
     let conversation_id = match persistence::latest_conversation_id(db).await? {
         Some(id) => id,
         None => return Ok(()),
@@ -81,7 +92,7 @@ async fn tick(app: &AppHandle, db: &DbHandle, client: &LlamaClient) -> anyhow::R
 
     // Re-consolidation has priority: if too many active epochs, fold the oldest two.
     if active_epochs.len() >= RECONSOLIDATION_TRIGGER_EPOCH_COUNT {
-        if let Err(e) = run_reconsolidation(app, db, client, conversation_id, &active_epochs).await {
+        if let Err(e) = run_reconsolidation(app, db, client, conversation_id, &active_epochs, system_prompt).await {
             tracing::warn!("reconsolidation failed: {}", e);
         }
         return Ok(());
@@ -114,7 +125,7 @@ async fn tick(app: &AppHandle, db: &DbHandle, client: &LlamaClient) -> anyhow::R
         return Ok(());
     }
 
-    if let Err(e) = run_consolidation(app, db, client, conversation_id, &all_msgs, &active_epochs, to_consolidate).await {
+    if let Err(e) = run_consolidation(app, db, client, conversation_id, &all_msgs, &active_epochs, to_consolidate, system_prompt).await {
         tracing::warn!("consolidation generation failed: {}", e);
     }
     Ok(())
@@ -128,6 +139,7 @@ async fn run_consolidation(
     all_msgs: &[Message],
     active_epochs: &[persistence::ConsolidationEpoch],
     to_consolidate: &[Message],
+    system_prompt: &Arc<RwLock<String>>,
 ) -> anyhow::Result<()> {
     let period_start = to_consolidate.first().unwrap().id;
     let period_end = to_consolidate.last().unwrap().id;
@@ -139,9 +151,10 @@ async fn run_consolidation(
 
     // Build the context for Dave-as-author: SYSTEM + anchor + active epochs +
     // the messages being consolidated + a final user turn with the meta.
+    let sys = system_prompt.read().unwrap().clone();
     let mut messages = vec![ChatMessage {
         role: "system".into(),
-        content: prompts::SYSTEM_PROMPT.into(),
+        content: sys,
     }];
     let anchor_end = ANCHOR_MESSAGE_COUNT.min(all_msgs.len());
     for m in &all_msgs[..anchor_end] {
@@ -207,6 +220,7 @@ async fn run_reconsolidation(
     client: &LlamaClient,
     conversation_id: i64,
     active_epochs: &[persistence::ConsolidationEpoch],
+    system_prompt: &Arc<RwLock<String>>,
 ) -> anyhow::Result<()> {
     if active_epochs.len() < 2 {
         return Ok(());
@@ -219,8 +233,9 @@ async fn run_reconsolidation(
         e1.consolidation_depth, e2.consolidation_depth
     );
 
+    let sys = system_prompt.read().unwrap().clone();
     let messages = vec![
-        ChatMessage { role: "system".into(), content: prompts::SYSTEM_PROMPT.into() },
+        ChatMessage { role: "system".into(), content: sys },
         ChatMessage { role: "assistant".into(), content: e1.content.clone() },
         ChatMessage { role: "assistant".into(), content: e2.content.clone() },
         ChatMessage { role: "user".into(), content: META_RECONSOLIDATION.to_string() },
@@ -272,6 +287,7 @@ pub async fn manual_consolidate(
     app: &AppHandle,
     db: &DbHandle,
     client: &LlamaClient,
+    system_prompt: &Arc<RwLock<String>>,
     conversation_id: i64,
     range_start_msg_id: i64,
     range_end_msg_id: i64,
@@ -286,7 +302,7 @@ pub async fn manual_consolidate(
     if to_consolidate.is_empty() {
         return Err(anyhow::anyhow!("no messages in range {}..={}", range_start_msg_id, range_end_msg_id));
     }
-    run_consolidation(app, db, client, conversation_id, &all_msgs, &active_epochs, &to_consolidate).await?;
+    run_consolidation(app, db, client, conversation_id, &all_msgs, &active_epochs, &to_consolidate, system_prompt).await?;
     // Return the newest epoch (just inserted)
     let after = persistence::list_active_epochs(db, conversation_id).await?;
     after.into_iter().last()
