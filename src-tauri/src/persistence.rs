@@ -261,6 +261,36 @@ fn init_schema(conn: &Connection) -> Result<()> {
             created_at INTEGER NOT NULL,
             FOREIGN KEY(conversation_id) REFERENCES conversations(id)
         );
+        -- Initiation-timing corpus (PIY §4 / roadmap). presence_samples is the
+        -- user-presence timeline (logged on transition); initiation_anchors is
+        -- one row per ARMED outreach tick (past the idle threshold) with the
+        -- features + the decision. The censored negatives — "clock was armed,
+        -- Dave held, the user spoke first" — are reconstructed offline by
+        -- joining anchors to the next user message. These feed the learned
+        -- conditional-intensity timer. STAGE 0: logging only, no behavior change.
+        CREATE TABLE IF NOT EXISTS presence_samples (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts INTEGER NOT NULL,
+            state TEXT NOT NULL,              -- in_chat | present_elsewhere | away | unknown
+            os_idle_ms INTEGER,              -- null if unavailable
+            focused INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS initiation_anchors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts INTEGER NOT NULL,
+            conversation_id INTEGER,
+            seconds_since_user_input INTEGER NOT NULL,
+            presence_state TEXT NOT NULL,
+            focused INTEGER NOT NULL,
+            os_idle_ms INTEGER,
+            history_shape TEXT,
+            unanswered_reaches INTEGER NOT NULL,
+            consecutive_drops INTEGER NOT NULL,
+            threshold_seconds INTEGER NOT NULL,
+            time_of_day_min INTEGER NOT NULL, -- minutes since local midnight
+            day_of_week INTEGER NOT NULL,     -- 0=Mon .. 6=Sun
+            decision TEXT NOT NULL            -- reach | hold_adaptive_backoff | hold_max_unanswered
+        );
         CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_journal_unread ON journal(surfaced_at) WHERE surfaced_at IS NULL;
         CREATE INDEX IF NOT EXISTS idx_outreach_drops_conv ON outreach_drops(conversation_id, generated_at);
@@ -951,6 +981,70 @@ pub async fn mark_missed_reach(db: &DbHandle, conversation_id: i64) -> Result<()
         conn.execute(
             "INSERT INTO reach_counterfactuals (conversation_id, at_message_id, created_at) VALUES (?1, ?2, ?3)",
             params![conversation_id, at, now],
+        )?;
+        Ok(())
+    })
+    .await?
+}
+
+/// Log a user-presence sample (written on state transition by the sampler).
+pub async fn insert_presence_sample(
+    db: &DbHandle,
+    state: &str,
+    os_idle_ms: Option<i64>,
+    focused: bool,
+) -> Result<()> {
+    let db = db.clone();
+    let state = state.to_string();
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        let conn = db.lock().unwrap();
+        let now = Utc::now().timestamp();
+        conn.execute(
+            "INSERT INTO presence_samples (ts, state, os_idle_ms, focused) VALUES (?1, ?2, ?3, ?4)",
+            params![now, state, os_idle_ms, focused as i64],
+        )?;
+        Ok(())
+    })
+    .await?
+}
+
+/// Log one armed-tick initiation anchor with its features + decision. The
+/// training spine of the learned initiation timer; the censored "user spoke
+/// first" negatives are recovered offline by joining to the next user message.
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_initiation_anchor(
+    db: &DbHandle,
+    conversation_id: i64,
+    seconds_since_user_input: i64,
+    presence_state: &str,
+    focused: bool,
+    os_idle_ms: Option<i64>,
+    history_shape: &str,
+    unanswered_reaches: i64,
+    consecutive_drops: i64,
+    threshold_seconds: i64,
+    time_of_day_min: i64,
+    day_of_week: i64,
+    decision: &str,
+) -> Result<()> {
+    let db = db.clone();
+    let presence_state = presence_state.to_string();
+    let history_shape = history_shape.to_string();
+    let decision = decision.to_string();
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        let conn = db.lock().unwrap();
+        let now = Utc::now().timestamp();
+        conn.execute(
+            "INSERT INTO initiation_anchors
+             (ts, conversation_id, seconds_since_user_input, presence_state, focused,
+              os_idle_ms, history_shape, unanswered_reaches, consecutive_drops,
+              threshold_seconds, time_of_day_min, day_of_week, decision)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+            params![
+                now, conversation_id, seconds_since_user_input, presence_state, focused as i64,
+                os_idle_ms, history_shape, unanswered_reaches, consecutive_drops,
+                threshold_seconds, time_of_day_min, day_of_week, decision
+            ],
         )?;
         Ok(())
     })

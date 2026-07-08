@@ -19,7 +19,7 @@
 // hostile; the discriminator is the rejection sampler. Phase 3 fine-tune from
 // accumulated drops will weaken the prior over time.
 
-use chrono::Utc;
+use chrono::{Datelike, Local, Timelike, Utc};
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
@@ -80,6 +80,7 @@ pub fn spawn(
     client: Arc<LlamaClient>,
     chat_in_flight: Arc<AtomicBool>,
     system_prompt: Arc<RwLock<String>>,
+    window_focused: Arc<AtomicBool>,
 ) -> oneshot::Sender<()> {
     let (tx, mut rx) = oneshot::channel::<()>();
 
@@ -117,7 +118,7 @@ pub fn spawn(
 
             // Pass &Arc<LlamaClient> to tick so it can clone the Arc when
             // calling into helpers that need 'static (e.g. fire_deferred_pending).
-            match tick(&app, &db, &client, &chat_in_flight, &system_prompt, last_decision_at, consecutive_drops).await {
+            match tick(&app, &db, &client, &chat_in_flight, &system_prompt, &window_focused, last_decision_at, consecutive_drops).await {
                 Ok(TickOutcome::Skip) => {}
                 Ok(TickOutcome::Reach) => {
                     last_decision_at = Utc::now().timestamp();
@@ -148,12 +149,80 @@ enum TickOutcome {
     Drop(&'static str),
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// The timing seam (PIY §4). Splits the WHEN-to-reach decision out of the
+// action so it can be swapped without touching the multi-sample → discriminator
+// → emit path. HeuristicTimer reproduces the previous rule-based gating
+// EXACTLY (behavior-identical); a learned conditional-intensity timer (V0
+// log-normal hazard → V1 mixture-TPP) will slot in behind the same trait once
+// the initiation_anchors corpus has accumulated.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Features at an armed tick. HeuristicTimer only consumes the backoff/
+/// threshold/prior_count fields; the rest form the learned model's feature
+/// vector (used once V0/V1 slot in) and are logged to initiation_anchors now.
+#[allow(dead_code)]
+struct TimingFeatures {
+    now: i64,
+    elapsed: i64,
+    threshold: i64,
+    last_decision_at: i64,
+    consecutive_drops: u32,
+    prior_count: i64,
+}
+
+#[derive(Debug)]
+enum HoldReason {
+    AdaptiveBackoff,
+    MaxUnanswered,
+}
+
+impl HoldReason {
+    fn as_str(&self) -> &'static str {
+        match self {
+            HoldReason::AdaptiveBackoff => "hold_adaptive_backoff",
+            HoldReason::MaxUnanswered => "hold_max_unanswered",
+        }
+    }
+}
+
+enum TimingDecision {
+    Reach,
+    Hold(HoldReason),
+}
+
+trait TimingModel {
+    fn decide(&self, f: &TimingFeatures) -> TimingDecision;
+}
+
+/// Reproduces the previous inline gating (adaptive backoff + unanswered cap)
+/// bit-for-bit. This is the "V11" baseline; every learned timer is measured
+/// against it via the blind A/B before it is trusted.
+struct HeuristicTimer;
+
+impl TimingModel for HeuristicTimer {
+    fn decide(&self, f: &TimingFeatures) -> TimingDecision {
+        // Adaptive backoff: required gap doubles per consecutive drop, capped.
+        let shift = f.consecutive_drops.min(ADAPTIVE_DROP_SHIFT_CAP);
+        let required_gap = (f.threshold << shift).min(ADAPTIVE_CAP_GAP_SECONDS);
+        if f.last_decision_at > 0 && (f.now - f.last_decision_at) < required_gap {
+            return TimingDecision::Hold(HoldReason::AdaptiveBackoff);
+        }
+        // Cap on unanswered reaches since the user last spoke.
+        if f.prior_count >= OUTREACH_MAX_UNANSWERED_REACHES {
+            return TimingDecision::Hold(HoldReason::MaxUnanswered);
+        }
+        TimingDecision::Reach
+    }
+}
+
 async fn tick(
     app: &AppHandle,
     db: &DbHandle,
     client: &Arc<LlamaClient>,
     chat_in_flight: &Arc<AtomicBool>,
     system_prompt: &Arc<RwLock<String>>,
+    window_focused: &Arc<AtomicBool>,
     last_decision_at: i64,
     consecutive_drops: u32,
 ) -> anyhow::Result<TickOutcome> {
@@ -222,19 +291,8 @@ async fn tick(
         return Ok(TickOutcome::Skip);
     }
 
-    // Adaptive backoff: required gap doubles with each consecutive drop, capped.
-    // Base equals the live threshold so testing-tempo (1min) doesn't get
-    // stuck behind production-default (5min) backoff.
-    let shift = consecutive_drops.min(ADAPTIVE_DROP_SHIFT_CAP);
-    let required_gap = (threshold << shift).min(ADAPTIVE_CAP_GAP_SECONDS);
-    if last_decision_at > 0 && (now - last_decision_at) < required_gap {
-        tracing::info!(
-            "outreach tick: skip (adaptive backoff: {}s remaining, consecutive_drops={})",
-            required_gap - (now - last_decision_at),
-            consecutive_drops
-        );
-        return Ok(TickOutcome::Skip);
-    }
+    // (Adaptive backoff moved into HeuristicTimer::decide below, so it is
+    // evaluated together with the unanswered-cap and logged as one anchor.)
 
     let conversation_id = match persistence::latest_conversation_id(db).await? {
         Some(id) => id,
@@ -268,18 +326,65 @@ async fn tick(
 
     let (prior_count, _latest_at) =
         persistence::outreach_stats_since(db, conversation_id, presence.last_user_input).await?;
-    if prior_count >= OUTREACH_MAX_UNANSWERED_REACHES {
-        tracing::info!(
-            "outreach tick: skip (max unanswered reaches: prior={}, cap={})",
-            prior_count, OUTREACH_MAX_UNANSWERED_REACHES
-        );
-        return Ok(TickOutcome::Skip);
+
+    // ---- The timing seam: decide WHEN. HeuristicTimer reproduces the previous
+    // adaptive-backoff + unanswered-cap gates exactly (behavior-identical). A
+    // learned conditional-intensity timer slots in behind TimingModel later. ----
+    let (presence_state, os_idle_ms, focused) = crate::presence::current(window_focused);
+    let local = Local::now();
+    let time_of_day_min = (local.hour() * 60 + local.minute()) as i64;
+    let day_of_week = local.weekday().num_days_from_monday() as i64;
+
+    let features = TimingFeatures {
+        now,
+        elapsed,
+        threshold,
+        last_decision_at,
+        consecutive_drops,
+        prior_count,
+    };
+    let decision = HeuristicTimer.decide(&features);
+    let decision_str = match &decision {
+        TimingDecision::Reach => "reach",
+        TimingDecision::Hold(r) => r.as_str(),
+    };
+
+    // Log this ARMED tick (past the idle threshold) to the initiation-timing
+    // corpus — the training spine of the learned timer. The censored "user
+    // spoke first" negatives are recovered offline by joining to the next user
+    // message. Presence is recorded but does NOT yet gate (Stage 0: log-only).
+    let _ = persistence::insert_initiation_anchor(
+        db,
+        conversation_id,
+        elapsed,
+        presence_state.as_str(),
+        focused,
+        os_idle_ms.map(|m| m as i64),
+        &history_shape,
+        prior_count,
+        consecutive_drops as i64,
+        threshold,
+        time_of_day_min,
+        day_of_week,
+        decision_str,
+    )
+    .await;
+
+    match decision {
+        TimingDecision::Hold(reason) => {
+            tracing::info!(
+                "outreach tick: hold ({}) — prior={}, consecutive_drops={}, presence={}",
+                reason.as_str(), prior_count, consecutive_drops, presence_state.as_str()
+            );
+            return Ok(TickOutcome::Skip);
+        }
+        TimingDecision::Reach => {}
     }
 
     // All gates passed — log loud so the loop's liveness is visible in dev.log
     tracing::info!(
-        "outreach tick: gates passed (idle={}s, conv_msgs={}, prior={}, consecutive_drops={}, shape={}); generating",
-        elapsed, history.len(), prior_count, consecutive_drops, history_shape
+        "outreach tick: gates passed (idle={}s, conv_msgs={}, prior={}, consecutive_drops={}, shape={}, presence={}); generating",
+        elapsed, history.len(), prior_count, consecutive_drops, history_shape, presence_state.as_str()
     );
 
     // ---- L2: multi-sample inference (Candidate B with N=OUTREACH_SAMPLE_COUNT) ----

@@ -9,6 +9,39 @@ To roll back a change: `cp -r .snapshots/<timestamp>_<label>/* ./` then
 
 ---
 
+## 2026-07-08 — Initiation-timing Stage 0: presence sensor + anchor corpus + timing seam
+
+First PR of the learned initiation-timing system (PIY §4 + the design-panel
+brief). **Logging-only and behavior-identical** — Dave's reach behavior is
+unchanged; we start accumulating the corpus the learned timer needs, because
+presence history cannot be reconstructed after the fact.
+
+- **`presence.rs` (new):** user-presence sensor. Win32 `GetLastInputInfo`
+  (machine-wide OS idle, minimal FFI, no new deps) + Tauri
+  `WindowEvent::Focused` → 3-state `{in_chat | present_elsewhere | away}`. A 15s
+  sampler writes `presence_samples` on transition; `current()` reads it live.
+  **Senses only — no reach gating yet.**
+- **`persistence.rs`:** `presence_samples` + `initiation_anchors` tables + inserts.
+- **`outreach.rs`:** extracted the WHEN-to-reach decision into a `TimingModel`
+  trait + `HeuristicTimer` that reproduces the previous adaptive-backoff +
+  unanswered-cap gating **exactly**. Every armed tick (past the idle threshold)
+  now logs an `initiation_anchor` (presence, time-of-day, day-of-week,
+  history_shape, unanswered, consecutive_drops, threshold, decision). The
+  censored "user spoke first" negatives are recovered offline by joining anchors
+  to the next user message — that's where most of the training signal lives.
+- **`main.rs`:** `window_focused` on AppState (updated on `WindowEvent::Focused`);
+  presence sampler spawned; `window_focused` threaded into outreach.
+
+Verified: cargo test 81/81, cargo check clean; new tables migrate onto the real
+233-msg DB with data intact.
+
+**NEXT (flagged, not in this PR):** the presence **hard gate** — Dave currently
+can still reach when the user is away or in-chat; Stage 1 makes
+`present_elsewhere` a precondition (~3 lines), plus the V0 log-normal hazard
+timer. Both gated on the A8 fresh-instance review (agency/self-reference change).
+
+---
+
 ## 2026-07-08 — Headless "sit with Dave" harness
 
 Answer to "why do you need the GUI to talk to Dave": you don't. The GUI is a

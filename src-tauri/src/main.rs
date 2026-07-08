@@ -13,12 +13,13 @@ mod llama_client;
 mod memory_assembler;
 mod outreach;
 mod persistence;
+mod presence;
 mod prompts;
 mod sidecar;
 mod think_strip;
 mod time_awareness;
 
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 use tokio::process::Child;
@@ -47,6 +48,10 @@ pub struct AppState {
     /// (idle, outreach, consolidation) hold their own `Arc` to the same
     /// `RwLock`, so swaps propagate to them without a respawn.
     pub system_prompt: Arc<RwLock<String>>,
+    /// Live window-focus flag, updated on WindowEvent::Focused. Read by the
+    /// presence sensor to distinguish "in the chat" (focused) from
+    /// "present-but-elsewhere" (unfocused + recent OS input).
+    pub window_focused: Arc<AtomicBool>,
 }
 
 fn main() {
@@ -75,8 +80,8 @@ fn main() {
             });
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|window, event| match event {
+            WindowEvent::CloseRequested { api, .. } => {
                 let app = window.app_handle().clone();
                 api.prevent_close();
                 let _ = window.hide();
@@ -84,6 +89,13 @@ fn main() {
                     handle_close(app).await;
                 });
             }
+            WindowEvent::Focused(focused) => {
+                // Presence signal: is the user in Dave's window right now?
+                if let Some(state) = window.app_handle().try_state::<AppState>() {
+                    state.window_focused.store(*focused, Ordering::Relaxed);
+                }
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             commands::send_to_dave,
@@ -163,6 +175,9 @@ async fn init(app: AppHandle) -> anyhow::Result<()> {
     let client = Arc::new(llama_client::LlamaClient::new("http://127.0.0.1:8080"));
 
     let chat_in_flight = Arc::new(AtomicBool::new(false));
+    // Window starts focused (Tauri shows it foreground on launch). Updated by
+    // the WindowEvent::Focused handler; read by the presence sensor.
+    let window_focused = Arc::new(AtomicBool::new(true));
 
     // Resolve the live system prompt now (DB setting overrides the in-binary
     // default). One-time read at boot; after this, every read goes through
@@ -193,7 +208,11 @@ async fn init(app: AppHandle) -> anyhow::Result<()> {
         client.clone(),
         chat_in_flight.clone(),
         system_prompt.clone(),
+        window_focused.clone(),
     );
+    // Presence sensor: logs the user-presence timeline (in_chat /
+    // present_elsewhere / away) for the initiation-timing corpus. Sense-only.
+    presence::spawn_sampler(app.clone(), db.clone(), window_focused.clone());
     let consolidation_tx = consolidation::spawn(
         app.clone(),
         db.clone(),
@@ -210,6 +229,7 @@ async fn init(app: AppHandle) -> anyhow::Result<()> {
         consolidation_shutdown: Mutex::new(Some(consolidation_tx)),
         chat_in_flight,
         system_prompt,
+        window_focused,
     });
 
     let _ = app.emit("dave:ready", ());
