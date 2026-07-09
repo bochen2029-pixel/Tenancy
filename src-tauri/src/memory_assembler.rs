@@ -60,6 +60,16 @@ pub const CONTEXT_SEND_BUDGET_TOKENS: usize = 48_000;
 /// budget — immediate conversational coherence must survive any cap.
 pub const MIN_RECENT_MESSAGES: usize = 12;
 
+/// Tokens reserved for the Ring-4 recall block (REEL Op 4) — reserved
+/// UNCONDITIONALLY, whether or not recall fires this turn. Two reasons (both
+/// A8-review findings): (1) it breaks the circular dependency between
+/// recall-eligibility (which needs to know what got trimmed) and the trim
+/// (which would otherwise depend on whether recall fired); (2) it keeps
+/// `recent_keep_start` identical turn-to-turn, so the prompt prefix stays
+/// stable and llama-server's prefix cache keeps hitting. Costs ~2-4 recent
+/// messages of headroom; recall.rs caps its block to this budget.
+pub const RECALL_RESERVE_TOKENS: usize = 600;
+
 /// Char-based token estimate. Cheap, deterministic, no tokenizer dep.
 /// English averages ~4 chars/token; we round up for safety.
 pub fn estimate_tokens(text: &str) -> usize {
@@ -231,12 +241,49 @@ pub fn recent_keep_start(fixed_tokens: usize, recent: &[Message]) -> usize {
     keep_start
 }
 
+/// The zone tokens that are committed before the recent zone fills the rest:
+/// system + anchor + canvas + middle + the appended user turn + the recall
+/// reserve. Single definition shared by build_chat_messages and
+/// trimmed_recent_ids so the two can never disagree about the trim point.
+fn committed_tokens(
+    system_content: &str,
+    partition: &Partition,
+    appended_user: Option<&str>,
+) -> usize {
+    estimate_tokens(system_content)
+        + partition.anchor_tokens()
+        + partition.canvas_tokens()
+        + partition.middle_tokens()
+        + appended_user.map(estimate_tokens).unwrap_or(0)
+        + RECALL_RESERVE_TOKENS
+}
+
+/// The ids of recent-zone messages that will NOT be sent this turn (trimmed by
+/// the token budget). These, plus epoch-covered middle messages and the
+/// journal, are exactly the recall-eligible set — text that exists on the Tape
+/// but is not in front of Dave. Computable before recall runs because the
+/// recall reserve is unconditional.
+pub fn trimmed_recent_ids(
+    system_content: &str,
+    partition: &Partition,
+    appended_user: Option<&str>,
+) -> Vec<i64> {
+    let keep_start = recent_keep_start(
+        committed_tokens(system_content, partition, appended_user),
+        &partition.recent,
+    );
+    partition.recent[..keep_start].iter().map(|m| m.id).collect()
+}
+
 /// Build the chat-message vector to send to llama-server. The new user turn
 /// is appended at the end (caller passes the user text separately or omits
-/// for outreach/idle which append nothing or their own meta).
+/// for outreach/idle which append nothing or their own meta). `recalled` is
+/// the Ring-4 recall block (recall.rs), already gated and budget-capped; it
+/// merges into the canvas memory turn so assistant turns never triple-stack.
 pub fn build_chat_messages(
     system_content: &str,
     partition: &Partition,
+    recalled: Option<&str>,
     appended_user: Option<&str>,
 ) -> Vec<ChatMessage> {
     let mut out = Vec::new();
@@ -247,13 +294,26 @@ pub fn build_chat_messages(
     for m in &partition.anchor {
         out.push(ChatMessage { role: m.role.clone(), content: m.content.clone() });
     }
-    // Canvas: operator-authored notes/facts, injected as an assistant turn
-    // immediately after the anchor zone. Reads as "things Dave wrote/knows
-    // about this conversation." Empty canvas = no injection.
+    // Memory turn: operator-authored canvas + (when it fired) the Ring-4
+    // recall block, as ONE assistant turn immediately after the anchor zone.
+    // Reads as "things Dave knows/remembers about this conversation."
+    // Empty both = no injection.
+    let mut memory_turn = String::new();
     if !partition.canvas.trim().is_empty() {
+        memory_turn.push_str(&partition.canvas);
+    }
+    if let Some(r) = recalled {
+        if !r.trim().is_empty() {
+            if !memory_turn.is_empty() {
+                memory_turn.push_str("\n\n");
+            }
+            memory_turn.push_str(r);
+        }
+    }
+    if !memory_turn.trim().is_empty() {
         out.push(ChatMessage {
             role: "assistant".into(),
-            content: partition.canvas.clone(),
+            content: memory_turn,
         });
     }
     for block in &partition.middle {
@@ -277,13 +337,13 @@ pub fn build_chat_messages(
     // above and are never trimmed (they are Dave's durable memory); only the
     // OLDEST recent messages fall out of verbatim reach. Prevents the recent
     // zone (never consolidated) from growing context unbounded on long
-    // conversations.
-    let fixed_tokens = estimate_tokens(system_content)
-        + partition.anchor_tokens()
-        + partition.canvas_tokens()
-        + partition.middle_tokens()
-        + appended_user.map(estimate_tokens).unwrap_or(0);
-    let mut keep_start = recent_keep_start(fixed_tokens, &partition.recent);
+    // conversations. committed_tokens includes the unconditional recall
+    // reserve, so the trim point is identical whether or not recall fired —
+    // stable prefix, valid eligibility, warm prompt cache.
+    let mut keep_start = recent_keep_start(
+        committed_tokens(system_content, partition, appended_user),
+        &partition.recent,
+    );
     // Seam guard: if the last turn already emitted is an assistant (a canvas or
     // epoch injection, or an anchor ending on assistant) AND the kept recent
     // zone would open on another assistant, drop that single leading assistant
@@ -361,7 +421,7 @@ mod tests {
         }).collect();
         let e = epoch(1, 1, 31, 60, "[memory]");
         let p = partition(&msgs, &[e], "");
-        let chat = build_chat_messages("SYS", &p, Some("hello"));
+        let chat = build_chat_messages("SYS", &p, None, Some("hello"));
         // 1 system + 30 anchor + 1 epoch + 40 bare middle + 100 recent + 1 appended user = 173
         assert_eq!(chat.len(), 173);
         assert_eq!(chat[0].role, "system");
@@ -372,7 +432,7 @@ mod tests {
     fn canvas_inserts_after_anchor() {
         let msgs: Vec<Message> = (1..=10).map(|i| msg(i, "user", "x")).collect();
         let p = partition(&msgs, &[], "facts: brass strips matter");
-        let chat = build_chat_messages("SYS", &p, Some("hi"));
+        let chat = build_chat_messages("SYS", &p, None, Some("hi"));
         // 1 sys + 10 anchor + 1 canvas + 1 user = 13
         assert_eq!(chat.len(), 13);
         assert_eq!(chat[11].role, "assistant");
@@ -383,7 +443,7 @@ mod tests {
     fn empty_canvas_omits_insertion() {
         let msgs: Vec<Message> = (1..=10).map(|i| msg(i, "user", "x")).collect();
         let p = partition(&msgs, &[], "   ");
-        let chat = build_chat_messages("SYS", &p, Some("hi"));
+        let chat = build_chat_messages("SYS", &p, None, Some("hi"));
         // 1 sys + 10 anchor + 0 canvas + 1 user = 12
         assert_eq!(chat.len(), 12);
     }
@@ -438,7 +498,7 @@ mod tests {
         let mut msgs: Vec<Message> = (1..=30).map(|i| msg(i, "user", "x")).collect();
         msgs.extend((31..=130).map(|i| msg(i, "user", &big)));
         let p = partition(&msgs, &[], "");
-        let chat = build_chat_messages("SYS", &p, Some("hi"));
+        let chat = build_chat_messages("SYS", &p, None, Some("hi"));
         // Big recent messages that survived the budget (content longer than any
         // anchor "x" / system / appended "hi").
         let recent_sent = chat.iter().filter(|m| m.content.len() > 100).count();
@@ -461,7 +521,7 @@ mod tests {
                         if i == 0 { "DROPME" } else { "keep" }))
             .collect();
         let p = Partition { anchor, canvas: "a note".into(), middle: vec![], recent };
-        let chat = build_chat_messages("SYS", &p, Some("hi"));
+        let chat = build_chat_messages("SYS", &p, None, Some("hi"));
         // The leading assistant (DROPME) is gone; the 19 following turns remain.
         assert!(!chat.iter().any(|m| m.content == "DROPME"));
         assert_eq!(chat.iter().filter(|m| m.content == "keep").count(), 19);
@@ -478,7 +538,70 @@ mod tests {
                         if i == 0 { "KEEPME" } else { "k" }))
             .collect();
         let p = Partition { anchor, canvas: String::new(), middle: vec![], recent };
-        let chat = build_chat_messages("SYS", &p, Some("hi"));
+        let chat = build_chat_messages("SYS", &p, None, Some("hi"));
         assert!(chat.iter().any(|m| m.content == "KEEPME"));
+    }
+
+    #[test]
+    fn recall_reserve_keeps_trim_point_stable() {
+        // The trim point must be IDENTICAL whether or not recall fired — the
+        // reserve is unconditional (prefix-cache stability + eligibility
+        // computable up front).
+        let big = "a".repeat(3997);
+        let msgs: Vec<Message> = (1..=130).map(|i| msg(i, "user", &big)).collect();
+        let p = partition(&msgs, &[], "");
+        let without = build_chat_messages("SYS", &p, None, Some("hi"));
+        let with = build_chat_messages("SYS", &p, Some("a recalled block"), Some("hi"));
+        // Same number of recent (big) messages either way.
+        let count_big = |chat: &Vec<ChatMessage>| chat.iter().filter(|m| m.content.len() > 100).count();
+        assert_eq!(count_big(&without), count_big(&with));
+    }
+
+    #[test]
+    fn recall_merges_into_canvas_turn() {
+        // Canvas + recall must be ONE assistant turn (no triple-stacking).
+        let anchor: Vec<Message> = (1..=10).map(|i| msg(i, "user", "x")).collect();
+        let p = Partition {
+            anchor, canvas: "canvas facts".into(), middle: vec![],
+            recent: vec![msg(100, "user", "recent")],
+        };
+        let chat = build_chat_messages("SYS", &p, Some("recalled things"), Some("hi"));
+        let merged: Vec<&ChatMessage> = chat.iter()
+            .filter(|m| m.content.contains("canvas facts") || m.content.contains("recalled things"))
+            .collect();
+        assert_eq!(merged.len(), 1, "canvas and recall must merge into one turn");
+        assert!(merged[0].content.contains("canvas facts"));
+        assert!(merged[0].content.contains("recalled things"));
+        assert_eq!(merged[0].role, "assistant");
+    }
+
+    #[test]
+    fn recall_alone_still_injects_without_canvas() {
+        let anchor: Vec<Message> = (1..=10).map(|i| msg(i, "user", "x")).collect();
+        let p = Partition {
+            anchor, canvas: String::new(), middle: vec![],
+            recent: vec![msg(100, "user", "recent")],
+        };
+        let chat = build_chat_messages("SYS", &p, Some("recalled things"), Some("hi"));
+        assert!(chat.iter().any(|m| m.role == "assistant" && m.content.contains("recalled things")));
+    }
+
+    #[test]
+    fn trimmed_recent_ids_matches_what_is_not_sent() {
+        // The eligibility helper and the assembler must agree exactly: a
+        // recent id is either sent or reported trimmed, never both/neither.
+        // Small anchor ("x") so the >100-char filter counts only recent.
+        let big = "a".repeat(3997);
+        let mut msgs: Vec<Message> = (1..=30).map(|i| msg(i, "user", "x")).collect();
+        msgs.extend((31..=130).map(|i| msg(i, "user", &big)));
+        let p = partition(&msgs, &[], "");
+        let trimmed = trimmed_recent_ids("SYS", &p, Some("hi"));
+        let chat = build_chat_messages("SYS", &p, None, Some("hi"));
+        let sent_count = chat.iter().filter(|m| m.content.len() > 100).count();
+        assert_eq!(trimmed.len() + sent_count, p.recent.len());
+        // Trimmed are the OLDEST ids.
+        for (i, id) in trimmed.iter().enumerate() {
+            assert_eq!(*id, p.recent[i].id);
+        }
     }
 }

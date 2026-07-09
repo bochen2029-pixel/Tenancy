@@ -297,6 +297,28 @@ fn init_schema(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_journal_unread ON journal(surfaced_at) WHERE surfaced_at IS NULL;
         CREATE INDEX IF NOT EXISTS idx_outreach_drops_conv ON outreach_drops(conversation_id, generated_at);
+        -- Ring 4 (REEL Op 4): full-text index over the Tape. kind = message |
+        -- epoch | journal; ref_id = the source row id. Kept in sync by the
+        -- insert/supersede/edit paths; rebuilt by backfill if found empty.
+        CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+            content,
+            kind,
+            ref_id,
+            conversation_id UNINDEXED,
+            created_at UNINDEXED,
+            role UNINDEXED,
+            tokenize = 'porter unicode61'
+        );
+        -- Recall observability: one row per recall fire (A8-review rec — the
+        -- feature's quality is invisible without it). Read by corpus_inspect.py.
+        CREATE TABLE IF NOT EXISTS recall_fires (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts INTEGER NOT NULL,
+            conversation_id INTEGER,
+            query_terms TEXT NOT NULL,
+            hit_count INTEGER NOT NULL,
+            injected_tokens INTEGER NOT NULL
+        );
         "#,
     )?;
 
@@ -318,6 +340,43 @@ fn init_schema(conn: &Connection) -> Result<()> {
         "ALTER TABLE initiation_anchors ADD COLUMN timer_decision TEXT",
         [],
     );
+    // Migrations for the blind-A/B + exploration instrumentation (2026-07-09):
+    // which arm governed the episode, whether the timer's reach was an
+    // ε-exploration, and the exact delivered-reach message for ratings joins.
+    let _ = conn.execute("ALTER TABLE initiation_anchors ADD COLUMN ab_arm TEXT", []);
+    let _ = conn.execute(
+        "ALTER TABLE initiation_anchors ADD COLUMN explored INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE initiation_anchors ADD COLUMN reach_message_id INTEGER",
+        [],
+    );
+    // Migration: counterfactuals gain a kind — 'missed_reach' (should have
+    // reached, didn't) vs 'good_silence' (the quiet was right). The symmetric
+    // down-channel the §3c guardrails call for.
+    let _ = conn.execute(
+        "ALTER TABLE reach_counterfactuals ADD COLUMN kind TEXT NOT NULL DEFAULT 'missed_reach'",
+        [],
+    );
+
+    // Ring 4 backfill: if the FTS index is empty but the source tables are
+    // not (fresh index on an existing DB), rebuild it from the Tape. Runs
+    // once; subsequent opens see a populated index and skip.
+    let fts_count: i64 = conn.query_row("SELECT COUNT(*) FROM memory_fts", [], |r| r.get(0))?;
+    if fts_count == 0 {
+        conn.execute_batch(
+            r#"
+            INSERT INTO memory_fts (content, kind, ref_id, conversation_id, created_at, role)
+            SELECT content, 'message', id, conversation_id, created_at, role FROM messages;
+            INSERT INTO memory_fts (content, kind, ref_id, conversation_id, created_at, role)
+            SELECT content, 'journal', id, NULL, created_at, type FROM journal;
+            INSERT INTO memory_fts (content, kind, ref_id, conversation_id, created_at, role)
+            SELECT content, 'epoch', id, conversation_id, created_at, 'assistant'
+            FROM consolidation_epochs WHERE superseded_by IS NULL;
+            "#,
+        )?;
+    }
 
     Ok(())
 }
@@ -400,6 +459,13 @@ pub async fn insert_message(
             params![conversation_id, role, content, now, flag],
         )?;
         let id = conn.last_insert_rowid();
+        // Ring 4: mirror into the Tape index. Best-effort — recall degrades
+        // gracefully if a row is missing; the message table stays authoritative.
+        let _ = conn.execute(
+            "INSERT INTO memory_fts (content, kind, ref_id, conversation_id, created_at, role)
+             VALUES (?1, 'message', ?2, ?3, ?4, ?5)",
+            params![content, id, conversation_id, now, role],
+        );
         Ok(Message {
             id,
             conversation_id,
@@ -456,8 +522,15 @@ pub async fn insert_journal(db: &DbHandle, entry_type: &str, content: &str) -> R
             "INSERT INTO journal (created_at, type, content) VALUES (?1, ?2, ?3)",
             params![now, entry_type, content],
         )?;
+        let id = conn.last_insert_rowid();
+        // Ring 4: Dave's own writing is prime recall material.
+        let _ = conn.execute(
+            "INSERT INTO memory_fts (content, kind, ref_id, conversation_id, created_at, role)
+             VALUES (?1, 'journal', ?2, NULL, ?3, ?4)",
+            params![content, id, now, entry_type],
+        );
         Ok(JournalEntry {
-            id: conn.last_insert_rowid(),
+            id,
             created_at: now,
             entry_type,
             content,
@@ -973,10 +1046,14 @@ pub async fn rate_last_reach(
     .await?
 }
 
-/// Record a "you should have reached here and didn't" counterfactual at the
-/// current end of the conversation. Part of the PIY curation surface.
-pub async fn mark_missed_reach(db: &DbHandle, conversation_id: i64) -> Result<()> {
+/// Record a point-in-time judgment on the CURRENT silence. kind =
+/// 'missed_reach' ("you should have reached here and didn't") or
+/// 'good_silence' ("this quiet is right"). The symmetric down-channel pair —
+/// without the positive silence label, single-bit curation only ever pushes
+/// the future timer toward reaching more. Part of the PIY curation surface.
+pub async fn mark_silence(db: &DbHandle, conversation_id: i64, kind: &str) -> Result<()> {
     let db = db.clone();
+    let kind = kind.to_string();
     tokio::task::spawn_blocking(move || -> Result<()> {
         let conn = db.lock().unwrap();
         let at: Option<i64> = conn
@@ -988,12 +1065,17 @@ pub async fn mark_missed_reach(db: &DbHandle, conversation_id: i64) -> Result<()
             .optional()?;
         let now = Utc::now().timestamp();
         conn.execute(
-            "INSERT INTO reach_counterfactuals (conversation_id, at_message_id, created_at) VALUES (?1, ?2, ?3)",
-            params![conversation_id, at, now],
+            "INSERT INTO reach_counterfactuals (conversation_id, at_message_id, created_at, kind) VALUES (?1, ?2, ?3, ?4)",
+            params![conversation_id, at, now, kind],
         )?;
         Ok(())
     })
     .await?
+}
+
+/// Legacy name kept for the existing command path.
+pub async fn mark_missed_reach(db: &DbHandle, conversation_id: i64) -> Result<()> {
+    mark_silence(db, conversation_id, "missed_reach").await
 }
 
 /// Log a user-presence sample (written on state transition by the sampler).
@@ -1036,26 +1118,176 @@ pub async fn insert_initiation_anchor(
     day_of_week: i64,
     decision: &str,
     timer_decision: &str,
-) -> Result<()> {
+    ab_arm: &str,
+    explored: bool,
+) -> Result<i64> {
     let db = db.clone();
     let presence_state = presence_state.to_string();
     let history_shape = history_shape.to_string();
     let decision = decision.to_string();
     let timer_decision = timer_decision.to_string();
-    tokio::task::spawn_blocking(move || -> Result<()> {
+    let ab_arm = ab_arm.to_string();
+    tokio::task::spawn_blocking(move || -> Result<i64> {
         let conn = db.lock().unwrap();
         let now = Utc::now().timestamp();
         conn.execute(
             "INSERT INTO initiation_anchors
              (ts, conversation_id, seconds_since_user_input, presence_state, focused,
               os_idle_ms, history_shape, unanswered_reaches, consecutive_drops,
-              threshold_seconds, time_of_day_min, day_of_week, decision, timer_decision)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+              threshold_seconds, time_of_day_min, day_of_week, decision, timer_decision,
+              ab_arm, explored)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
             params![
                 now, conversation_id, seconds_since_user_input, presence_state, focused as i64,
                 os_idle_ms, history_shape, unanswered_reaches, consecutive_drops,
-                threshold_seconds, time_of_day_min, day_of_week, decision, timer_decision
+                threshold_seconds, time_of_day_min, day_of_week, decision, timer_decision,
+                ab_arm, explored as i64
             ],
+        )?;
+        Ok(conn.last_insert_rowid())
+    })
+    .await?
+}
+
+/// Stamp the delivered reach message onto the anchor row that fired it, so
+/// reach_ratings join to arms exactly (rating.message_id = anchor.reach_message_id)
+/// instead of by timestamp proximity through multi-sample latency.
+pub async fn set_anchor_reach_message(db: &DbHandle, anchor_id: i64, message_id: i64) -> Result<()> {
+    let db = db.clone();
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        let conn = db.lock().unwrap();
+        conn.execute(
+            "UPDATE initiation_anchors SET reach_message_id = ?1 WHERE id = ?2",
+            params![message_id, anchor_id],
+        )?;
+        Ok(())
+    })
+    .await?
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Ring 4 (REEL Op 4) query surface. Read-only helpers consumed by recall.rs.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// One FTS candidate row. (Roles for message excerpts come from
+/// load_message_window, not the hit itself.)
+#[derive(Debug, Clone)]
+pub struct RecallHit {
+    pub kind: String,
+    pub ref_id: i64,
+    pub content: String,
+}
+
+/// Total documents in the Tape index (for the rare-term document-frequency gate).
+pub async fn fts_doc_count(db: &DbHandle) -> Result<i64> {
+    let db = db.clone();
+    tokio::task::spawn_blocking(move || -> Result<i64> {
+        let conn = db.lock().unwrap();
+        Ok(conn.query_row("SELECT COUNT(*) FROM memory_fts", [], |r| r.get(0))?)
+    })
+    .await?
+}
+
+/// Document frequency of a single term (quoted, exact-token match under the
+/// porter tokenizer). Used by the rare-term gate.
+pub async fn fts_term_df(db: &DbHandle, term: &str) -> Result<i64> {
+    let db = db.clone();
+    // FTS5 string syntax: embedded double quotes are doubled.
+    let quoted = format!("\"{}\"", term.replace('"', "\"\""));
+    tokio::task::spawn_blocking(move || -> Result<i64> {
+        let conn = db.lock().unwrap();
+        Ok(conn.query_row(
+            "SELECT COUNT(*) FROM memory_fts WHERE memory_fts MATCH ?1",
+            params![quoted],
+            |r| r.get(0),
+        )?)
+    })
+    .await?
+}
+
+/// Top candidates for a match expression, best-first (bm25: lower = better).
+pub async fn recall_candidates(
+    db: &DbHandle,
+    match_expr: &str,
+    limit: i64,
+) -> Result<Vec<RecallHit>> {
+    let db = db.clone();
+    let match_expr = match_expr.to_string();
+    tokio::task::spawn_blocking(move || -> Result<Vec<RecallHit>> {
+        let conn = db.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT kind, ref_id, content FROM memory_fts
+             WHERE memory_fts MATCH ?1 ORDER BY bm25(memory_fts) LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![match_expr, limit], |r| {
+            Ok(RecallHit {
+                kind: r.get(0)?,
+                ref_id: r.get::<_, i64>(1)?,
+                content: r.get(2)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    })
+    .await?
+}
+
+/// A tight window of messages around a hit (hit ± radius, same conversation),
+/// in id order. The excerpt the recall block quotes.
+pub async fn load_message_window(
+    db: &DbHandle,
+    conversation_id: i64,
+    center_id: i64,
+    radius: i64,
+) -> Result<Vec<Message>> {
+    let db = db.clone();
+    tokio::task::spawn_blocking(move || -> Result<Vec<Message>> {
+        let conn = db.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, conversation_id, role, content, created_at FROM messages
+             WHERE conversation_id = ?1 AND id BETWEEN ?2 AND ?3 ORDER BY id ASC",
+        )?;
+        let rows = stmt.query_map(
+            params![conversation_id, center_id - radius, center_id + radius],
+            |r| {
+                Ok(Message {
+                    id: r.get(0)?,
+                    conversation_id: r.get(1)?,
+                    role: r.get(2)?,
+                    content: r.get(3)?,
+                    created_at: r.get(4)?,
+                })
+            },
+        )?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    })
+    .await?
+}
+
+/// Recall observability row (best-effort).
+pub async fn insert_recall_fire(
+    db: &DbHandle,
+    conversation_id: i64,
+    query_terms: &str,
+    hit_count: i64,
+    injected_tokens: i64,
+) -> Result<()> {
+    let db = db.clone();
+    let query_terms = query_terms.to_string();
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        let conn = db.lock().unwrap();
+        let now = Utc::now().timestamp();
+        conn.execute(
+            "INSERT INTO recall_fires (ts, conversation_id, query_terms, hit_count, injected_tokens)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![now, conversation_id, query_terms, hit_count, injected_tokens],
         )?;
         Ok(())
     })
@@ -1293,8 +1525,17 @@ pub async fn insert_epoch(
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![conversation_id, epoch_number, period_start_message_id, period_end_message_id, content, token_count, consolidation_depth, now],
         )?;
+        let new_id = conn.last_insert_rowid();
+        // Ring 4: index the epoch text (Dave's written memory). Ineligible for
+        // recall while active-in-context, but pre-indexed for the Ring-3
+        // budgeting slice that will drop old epochs from context.
+        let _ = conn.execute(
+            "INSERT INTO memory_fts (content, kind, ref_id, conversation_id, created_at, role)
+             VALUES (?1, 'epoch', ?2, ?3, ?4, 'assistant')",
+            params![content, new_id, conversation_id, now],
+        );
         Ok(ConsolidationEpoch {
-            id: conn.last_insert_rowid(),
+            id: new_id,
             conversation_id,
             epoch_number,
             period_start_message_id,
@@ -1333,6 +1574,17 @@ pub async fn update_epoch_content(
             "UPDATE consolidation_epochs SET content = ?1, token_count = ?2 WHERE id = ?3",
             params![new_content, new_token_count, epoch_id],
         )?;
+        // Ring 4: re-index the edited epoch text (delete + insert; FTS5 has no UPDATE).
+        let _ = conn.execute(
+            "DELETE FROM memory_fts WHERE kind = 'epoch' AND ref_id = ?1",
+            params![epoch_id],
+        );
+        let _ = conn.execute(
+            "INSERT INTO memory_fts (content, kind, ref_id, conversation_id, created_at, role)
+             SELECT content, 'epoch', id, conversation_id, created_at, 'assistant'
+             FROM consolidation_epochs WHERE id = ?1 AND superseded_by IS NULL",
+            params![epoch_id],
+        );
         Ok(prior)
     })
     .await?
@@ -1346,6 +1598,12 @@ pub async fn supersede_epoch(db: &DbHandle, old_id: i64, new_id: i64) -> Result<
             "UPDATE consolidation_epochs SET superseded_by = ?1 WHERE id = ?2",
             params![new_id, old_id],
         )?;
+        // Ring 4: a superseded epoch's text must never surface as a memory —
+        // its replacement carries the period now. Drop it from the index.
+        let _ = conn.execute(
+            "DELETE FROM memory_fts WHERE kind = 'epoch' AND ref_id = ?1",
+            params![old_id],
+        );
         Ok(())
     })
     .await?
@@ -1550,4 +1808,161 @@ pub async fn load_recent_outreach_drops(db: &DbHandle, limit: i64) -> Result<Vec
         Ok(out)
     })
     .await?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// In-memory DB with the full production schema. Fails loudly if the
+    /// bundled SQLite lacks FTS5 — the Ring-4 design rides on it.
+    fn mem_db() -> DbHandle {
+        let conn = Connection::open_in_memory().expect("open in-memory sqlite");
+        init_schema(&conn).expect("init_schema (FTS5 must be available in bundled SQLite)");
+        Arc::new(Mutex::new(conn))
+    }
+
+    #[test]
+    fn fts5_available_in_bundled_sqlite() {
+        // init_schema creates the memory_fts virtual table; a plain query
+        // against it proves FTS5 compiled in.
+        let db = mem_db();
+        let conn = db.lock().unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM memory_fts", [], |r| r.get(0))
+            .expect("memory_fts queryable");
+        assert_eq!(n, 0);
+    }
+
+    #[tokio::test]
+    async fn message_insert_mirrors_into_fts_and_matches() {
+        let db = mem_db();
+        let cid = create_conversation(&db).await.unwrap();
+        insert_message(&db, cid, "assistant", "the brass strip in the Royal Exchange floor", false)
+            .await
+            .unwrap();
+        insert_message(&db, cid, "user", "good morning", false).await.unwrap();
+
+        let hits = recall_candidates(&db, "\"brass\" OR \"exchange\"", 10).await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].kind, "message");
+        assert!(hits[0].content.contains("brass strip"));
+
+        assert_eq!(fts_doc_count(&db).await.unwrap(), 2);
+        assert_eq!(fts_term_df(&db, "brass").await.unwrap(), 1);
+        assert_eq!(fts_term_df(&db, "nonexistentword").await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn journal_insert_mirrors_into_fts() {
+        let db = mem_db();
+        insert_journal(&db, "idle", "the shape of a comma, holding its breath")
+            .await
+            .unwrap();
+        let hits = recall_candidates(&db, "\"comma\"", 10).await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].kind, "journal");
+    }
+
+    #[tokio::test]
+    async fn superseded_epoch_leaves_the_index() {
+        let db = mem_db();
+        let cid = create_conversation(&db).await.unwrap();
+        let e1 = insert_epoch(&db, cid, 1, 1, 10, "epoch about aqueducts", 5, 1).await.unwrap();
+        let e2 = insert_epoch(&db, cid, 2, 1, 20, "tighter epoch about aqueducts", 5, 2).await.unwrap();
+        assert_eq!(recall_candidates(&db, "\"aqueducts\"", 10).await.unwrap().len(), 2);
+        supersede_epoch(&db, e1.id, e2.id).await.unwrap();
+        let hits = recall_candidates(&db, "\"aqueducts\"", 10).await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].ref_id, e2.id);
+    }
+
+    #[tokio::test]
+    async fn message_window_loads_neighbors_in_order() {
+        let db = mem_db();
+        let cid = create_conversation(&db).await.unwrap();
+        let mut ids = Vec::new();
+        for i in 0..5 {
+            let m = insert_message(&db, cid, "user", &format!("msg {}", i), false).await.unwrap();
+            ids.push(m.id);
+        }
+        let win = load_message_window(&db, cid, ids[2], 1).await.unwrap();
+        assert_eq!(win.len(), 3);
+        assert_eq!(win[0].id, ids[1]);
+        assert_eq!(win[2].id, ids[3]);
+    }
+
+    #[tokio::test]
+    async fn anchor_insert_returns_id_and_reach_stamp_updates() {
+        let db = mem_db();
+        let cid = create_conversation(&db).await.unwrap();
+        let aid = insert_initiation_anchor(
+            &db, cid, 240, "present_elsewhere", false, Some(1000), "user_statement",
+            0, 0, 180, 600, 2, "reach", "reach", "b", true,
+        )
+        .await
+        .unwrap();
+        assert!(aid > 0);
+        let m = insert_message(&db, cid, "assistant", "a reach", true).await.unwrap();
+        set_anchor_reach_message(&db, aid, m.id).await.unwrap();
+        let conn = db.lock().unwrap();
+        let (arm, explored, rmid): (String, i64, i64) = conn
+            .query_row(
+                "SELECT ab_arm, explored, reach_message_id FROM initiation_anchors WHERE id = ?1",
+                params![aid],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(arm, "b");
+        assert_eq!(explored, 1);
+        assert_eq!(rmid, m.id);
+    }
+
+    #[tokio::test]
+    async fn silence_marks_carry_kind() {
+        let db = mem_db();
+        let cid = create_conversation(&db).await.unwrap();
+        insert_message(&db, cid, "user", "hello", false).await.unwrap();
+        mark_missed_reach(&db, cid).await.unwrap();
+        mark_silence(&db, cid, "good_silence").await.unwrap();
+        let conn = db.lock().unwrap();
+        let missed: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM reach_counterfactuals WHERE kind = 'missed_reach'",
+                [], |r| r.get(0),
+            )
+            .unwrap();
+        let blessed: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM reach_counterfactuals WHERE kind = 'good_silence'",
+                [], |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(missed, 1);
+        assert_eq!(blessed, 1);
+    }
+
+    #[test]
+    fn backfill_populates_fts_from_existing_tables() {
+        // Simulate a pre-Ring-4 DB: create schema, insert rows, wipe the FTS
+        // (as if it never existed), then re-run init_schema — backfill must
+        // repopulate from the Tape.
+        let conn = Connection::open_in_memory().unwrap();
+        init_schema(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO conversations (started_at) VALUES (1)", [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO messages (conversation_id, role, content, created_at) VALUES (1,'user','etymology of salary',1)",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO journal (created_at, type, content) VALUES (1,'idle','marginalia in old ledgers')",
+            [],
+        ).unwrap();
+        conn.execute("DELETE FROM memory_fts", []).unwrap();
+        init_schema(&conn).unwrap();
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM memory_fts", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 2);
+    }
 }

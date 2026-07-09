@@ -55,6 +55,14 @@ export default function App() {
         // He should have reached here and didn't.
         e.preventDefault();
         useDaveStore.getState().markMissedReach();
+      } else if (e.ctrlKey && e.altKey && e.code === 'KeyS') {
+        // This quiet is right — the positive silence label. Skipped while
+        // typing (typing means the silence is about to end, and AltGr+S on
+        // non-US layouts arrives as Ctrl+Alt+S mid-word).
+        const el = document.activeElement;
+        if (el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT')) return;
+        e.preventDefault();
+        useDaveStore.getState().blessSilence();
       } else if (e.key === 'Escape') {
         if (memoryOpen) closeMemory();
         else if (settingsOpen) closeSettings();

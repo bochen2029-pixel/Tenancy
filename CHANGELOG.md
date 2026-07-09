@@ -9,6 +9,76 @@ To roll back a change: `cp -r .snapshots/<timestamp>_<label>/* ./` then
 
 ---
 
+## 2026-07-09 — Ring 4 recall (perpetual memory, slice 1) + outreach A/B instrumentation
+
+Two linked slices toward the PIY wow factor, designed against the REEL protocol
+(`C:\OUTREACH\BC_Canon\MAY2026\Deeper\REEL_PROTOCOL_v1_0.md`, read in full) and
+A8-reviewed as a design BEFORE implementation (design doc:
+`docs/RING4_RECALL_AND_OUTREACH_INSTRUMENTATION_design.md`, verdict
+GO-WITH-CHANGES, all 5 required changes applied — see the doc's appendix).
+
+**Pillar 1 — Ring 4 recall (`recall.rs`, new).** Dave can now remember
+verbatim things that fell out of his context window. REEL mapping: Dave was
+already a Tier-2 REEL implementation (Ring 0 ≈ persona+anchor, Ring 2 ≈
+budgeted recent, Ring 3 ≈ Dave-voiced epochs, Tape ≈ messages+journal); Ring 4
+(retrieval) was the missing organ. Implementation:
+- **FTS5 index `memory_fts`** over the Tape (messages + journal + epoch text),
+  porter-stemmed, synced on every insert/supersede/edit, backfilled once onto
+  existing DBs. FTS5-in-bundled-rusqlite verified by a loud test.
+- **Hard-gated firing (the A8 review's core catch):** recall fires ONLY on a
+  remember-cue ("remember", "what was that…") or a rare content term
+  (document-frequency gate), with candidates needing ≥2 term matches unless
+  rare/cued. An every-turn block would bust llama-server's prefix cache at the
+  canvas position and re-eval ~40k tokens/turn — latency is presence.
+- **Exact eligibility:** only Tape text actually OUT of context (epoch-covered
+  middle ∪ budget-trimmed recent ∪ journal). The recall budget (600 tok) is
+  reserved UNCONDITIONALLY in the recent-zone trim so the trim point never
+  jitters (stable prefix, warm cache) and eligibility is computable up front.
+- **Injection:** ≤3 excerpts, quoted verbatim (never paraphrased — REEL §10.5
+  false-memory guard), merged INTO the canvas assistant turn (no stacked
+  assistant turns), opening `from further back, before it goes hazy:`.
+- **A7 backstop:** leak.rs now drops any visible reply containing the frame
+  line; chat pre-emission, outreach discriminator and consolidation all route
+  through it. **Echo smoke-eval run live against K0D**
+  (`tools/recall_echo_smoke.py`): CLEAN 4/4 — no frame echo, no format echo,
+  and the model continues recalled threads as natural memory.
+- Wired into all three inference paths (chat, outreach — the first
+  content-conditioned brick: he can reach *about* the thing — and headless).
+  Observability: `recall_fires` table + inspector section. Kill switch:
+  settings key `recall_enabled=0`.
+
+**Pillar 2 — outreach blind-A/B + guardrails (corpus still empty; this is the
+instrument, not the model).**
+- **`AbTimer`:** two timing arms, one deterministic per-EPISODE coin
+  (splitmix64 of episode identity — no within-episode interleaving). Arm A =
+  `HeuristicTimer` control; arm B = heuristic + exploration floor. Every
+  anchor row logs `ab_arm` + `explored`; a delivered reach stamps its
+  `reach_message_id` onto the anchor for EXACT ratings→arm joins.
+- **`ExploringTimer` (ε-floor, §3c):** at most ONE explored reach per episode,
+  at a deterministic scheduled instant uniform over the armed band (the A8
+  review killed per-tick ε: it made backoff punch-through scale with backoff
+  length and allowed reach-chains). Never overrides the MaxUnanswered
+  pestering guard; the presence governor still disposes.
+- **Bless-the-silence (Ctrl+Alt+S):** the missing symmetric down-channel —
+  `reach_counterfactuals.kind = 'good_silence'` vs `'missed_reach'`. Skipped
+  while typing (composer focus = the silence is ending; AltGr guard).
+- **CV tripwire in `corpus_inspect.py`:** inter-reach-interval CV (σ/μ) with
+  the reject-below-0.6 rule, plus arm/explored/ratings-by-arm/recall-fires
+  readouts. Inspector degrades gracefully on pre-upgrade DBs.
+
+Schema migrations (auto, on first run): `memory_fts`, `recall_fires`,
+`initiation_anchors.{ab_arm, explored, reach_message_id}`,
+`reach_counterfactuals.kind`.
+
+cargo test **105/105** (was 86; +19: FTS availability/hooks/backfill, recall
+gate/format/eligibility, reserve-stability, canvas-merge, arm/explored stamps,
+silence kinds, frame-echo leak). Deferred, recorded in the design doc: Op 6
+self-assessment, smooth Poincaré compression levels, cold-start thresholds,
+semantic/reranker upgrade behind the same seam, KEEL adapter (when KEEL pins a
+release — its Ring-4 recall landed but is mid-autonomous-build, default-off).
+
+---
+
 ## 2026-07-08 — Memory-horizon tuning: token-budget the recent zone (§7/§3d)
 
 Diagnosis (offline replay of the real 233-msg history): the assembled context is

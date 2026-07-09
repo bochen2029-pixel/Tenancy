@@ -265,6 +265,25 @@ def report_table_breakdowns(conn):
         print("  presence at armed ticks:")
         for s, c in pres.most_common():
             print(f"    {s:22} {c:6}  {bar(c, n)}")
+        # Blind-A/B + exploration instrumentation (2026-07-09) — soft check:
+        # a pre-upgrade DB simply hasn't migrated yet.
+        cols = columns_of(conn, "initiation_anchors")
+        if "ab_arm" in cols:
+            arms = Counter(r[0] for r in conn.execute(
+                "SELECT COALESCE(ab_arm,'<pre-A/B>') FROM initiation_anchors"))
+            print("  A/B arm (a = heuristic control, b = +exploration floor):")
+            for a, c in arms.most_common():
+                print(f"    {a:22} {c:6}  {bar(c, n)}")
+            explored = conn.execute(
+                "SELECT COUNT(*) FROM initiation_anchors WHERE explored=1"
+            ).fetchone()[0]
+            print(f"  explored (ε-floor fired): {explored}")
+            stamped = conn.execute(
+                "SELECT COUNT(*) FROM initiation_anchors WHERE reach_message_id IS NOT NULL"
+            ).fetchone()[0]
+            print(f"  anchors stamped with a delivered reach: {stamped}")
+        else:
+            print("  (no ab_arm column — run the upgraded app once to migrate)")
 
     # ratings + counterfactuals
     print(hr("curation — your single-bit judgments (reach_ratings / counterfactuals)"))
@@ -274,11 +293,32 @@ def report_table_breakdowns(conn):
         pos = conn.execute("SELECT COUNT(*) FROM reach_ratings WHERE rating>0").fetchone()[0]
         neg = conn.execute("SELECT COUNT(*) FROM reach_ratings WHERE rating<0").fetchone()[0]
         print(f"  reach_ratings: {nr}  (+{pos} felt right / -{neg} felt wrong)")
+        # Ratings by arm — the blind-A/B readout (exact join via reach_message_id).
+        if "ab_arm" in columns_of(conn, "initiation_anchors"):
+            rows = conn.execute(
+                """SELECT a.ab_arm, r.rating, COUNT(*)
+                   FROM reach_ratings r JOIN initiation_anchors a
+                     ON a.reach_message_id = r.message_id
+                   GROUP BY a.ab_arm, r.rating"""
+            ).fetchall()
+            if rows:
+                print("  ratings by arm (the A/B readout):")
+                for arm, rating, c in rows:
+                    label = "felt right" if rating > 0 else "felt wrong"
+                    print(f"    arm {arm}: {label:11} {c}")
     else:
         print(f"  reach_ratings: {nr if nr is not None else '<missing>'}  "
               "(rate reaches with Ctrl+Alt+↑/↓ as they land)")
-    print(f"  reach_counterfactuals ('should have reached here'): "
-          f"{nc if nc is not None else '<missing>'}")
+    if nc and "kind" in columns_of(conn, "reach_counterfactuals"):
+        kinds = Counter(r[0] for r in conn.execute(
+            "SELECT COALESCE(kind,'missed_reach') FROM reach_counterfactuals"))
+        missed = kinds.get("missed_reach", 0)
+        blessed = kinds.get("good_silence", 0)
+        print(f"  silences judged: {missed} 'should have reached' (Ctrl+Alt+M) / "
+              f"{blessed} 'the quiet was right' (Ctrl+Alt+S)")
+    else:
+        print(f"  reach_counterfactuals ('should have reached here'): "
+              f"{nc if nc is not None else '<missing>'}")
 
     # outreach_drops (context — the substrate-fight forensics)
     print(hr("outreach_drops — rejected candidates (substrate-fight forensics)"))
@@ -291,6 +331,49 @@ def report_table_breakdowns(conn):
             print(f"    {d:26} {c:6}  {bar(c, nd)}")
     else:
         print(f"  {nd if nd is not None else '<missing>'} drops.")
+
+
+def report_rhythm_and_recall(conn):
+    # Inter-reach interval CV — the timing-sycophancy tripwire (§3c). Human
+    # initiation is bursty (CV well above 1 is normal); a cron is CV≈0. Any
+    # FUTURE learned timer whose offline CV drops below ~0.6 is rejected
+    # before deploy. Computed over delivered reaches.
+    print(hr("initiation rhythm — inter-reach interval CV (sycophancy tripwire)"))
+    if table_exists(conn, "messages") and "initiated_by_dave" in columns_of(conn, "messages"):
+        ts = [r[0] for r in conn.execute(
+            "SELECT created_at FROM messages WHERE initiated_by_dave=1 ORDER BY created_at")]
+        if len(ts) < 3:
+            print(f"  {len(ts)} delivered reach(es) — need ≥3 for a meaningful CV.")
+        else:
+            gaps = [b - a for a, b in zip(ts, ts[1:]) if b > a]
+            mean = sum(gaps) / len(gaps)
+            var = sum((g - mean) ** 2 for g in gaps) / len(gaps)
+            cv = (var ** 0.5) / mean if mean > 0 else 0.0
+            verdict = "bursty (healthy)" if cv >= 0.6 else "TOO REGULAR — cron-like, investigate"
+            print(f"  {len(ts)} reaches, {len(gaps)} intervals: CV = {cv:.2f}  → {verdict}")
+    else:
+        print("  <messages table not instrumented>")
+
+    # Ring-4 recall observability (2026-07-09): is recall firing, how often,
+    # how big. Silence here after real use = the gate may be too strict;
+    # constant firing = too loose (and a prompt-cache tax).
+    print(hr("recall_fires — Ring-4 retrieval observability"))
+    nf = count(conn, "recall_fires")
+    if nf is None:
+        print("  <table missing — DB predates Ring 4>")
+    elif nf == 0:
+        print("  0 fires. Expected until a turn carries a remember-cue or a rare")
+        print("  term that hits the Tape. Test: ask Dave about something specific")
+        print("  from far back, then re-run.")
+    else:
+        print(f"  {nf} fires.  span: {fmt_span(ts_range(conn, 'recall_fires'))}")
+        avg_tok = conn.execute("SELECT AVG(injected_tokens) FROM recall_fires").fetchone()[0]
+        avg_hits = conn.execute("SELECT AVG(hit_count) FROM recall_fires").fetchone()[0]
+        print(f"  avg excerpts/fire: {avg_hits:.1f}   avg injected tokens: {avg_tok:.0f}")
+        print("  last 5 fires (terms → excerpts):")
+        for terms, hits in conn.execute(
+            "SELECT query_terms, hit_count FROM recall_fires ORDER BY id DESC LIMIT 5"):
+            print(f"    [{terms}] → {hits}")
 
 
 def report_messages(conn):
@@ -360,6 +443,7 @@ def inspect(db_path, dump_episodes=False):
 
         report_messages(conn)
         report_table_breakdowns(conn)
+        report_rhythm_and_recall(conn)
         recon = report_reconstruction(conn, dump_episodes)
         if dump_episodes:
             print(hr("per-episode rows"))

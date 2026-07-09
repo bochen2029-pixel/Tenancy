@@ -180,6 +180,8 @@ export const ipc = {
     invoke<number | null>('rate_last_reach', { conversationId, rating }),
   markMissedReach: (conversationId: number) =>
     invoke<void>('mark_missed_reach', { conversationId }),
+  blessSilence: (conversationId: number) =>
+    invoke<void>('bless_silence', { conversationId }),
 };
 
 export type Unlisten = UnlistenFn;

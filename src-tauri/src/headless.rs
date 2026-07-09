@@ -77,11 +77,27 @@ pub fn run() {
                 continue;
             }
 
+            // Ring-4 recall on the live turn, mirroring the real chat path
+            // (gated inside maybe_recall; usually a no-op).
+            let elig = crate::recall::RecallEligibility {
+                epoch_ranges: epochs
+                    .iter()
+                    .map(|e| (e.period_start_message_id, e.period_end_message_id))
+                    .collect(),
+                trimmed_ids: crate::memory_assembler::trimmed_recent_ids(&sys, &partition, None)
+                    .into_iter()
+                    .collect(),
+            };
+            let recalled = crate::recall::maybe_recall(&db, conversation_id, &user, &elig).await;
+            if let Some(r) = &recalled {
+                eprintln!("[headless] recall fired ({} chars)", r.chars().count());
+            }
+
             // Real persona + real memory partition (None = no appended turn),
             // then the in-process running conversation, then this new turn —
             // exactly the shape run_chat_inference_and_emit sends, plus our
             // live thread on top.
-            let mut messages = crate::memory_assembler::build_chat_messages(&sys, &partition, None);
+            let mut messages = crate::memory_assembler::build_chat_messages(&sys, &partition, recalled.as_deref(), None);
             messages.extend(running.iter().cloned());
             messages.push(ChatMessage { role: "user".into(), content: user.clone() });
 

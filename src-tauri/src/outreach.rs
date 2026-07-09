@@ -175,6 +175,21 @@ struct TimingFeatures {
     last_decision_at: i64,
     consecutive_drops: u32,
     prior_count: i64,
+    /// When the user last spoke (= now - elapsed). One silence = one episode;
+    /// this is the episode's identity for arm assignment and the
+    /// once-per-episode exploration schedule.
+    episode_start: i64,
+}
+
+/// splitmix64 — a real mixing hash so nothing about message cadence can
+/// correlate with arm assignment or exploration timing (A8-review rec: raw
+/// XOR/parity of a timestamp is not a mixer).
+fn splitmix64(mut x: u64) -> u64 {
+    x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let mut z = x;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }
 
 #[derive(Debug)]
@@ -224,6 +239,82 @@ impl TimingModel for HeuristicTimer {
             return TimingDecision::Hold(HoldReason::MaxUnanswered);
         }
         TimingDecision::Reach
+    }
+}
+
+/// Exploration window: the scheduled exploration instant is only actionable
+/// for this many seconds (3 ticks), so an episode explores AT MOST once —
+/// after a delivered explored reach resets last_decision_at, the window has
+/// passed and cannot re-fire. (A8 review: per-tick ε made backoff punch-through
+/// scale with backoff length and allowed reach-chains; a single scheduled
+/// instant per episode gives one clean off-policy sample instead.)
+const EXPLORE_WINDOW_SECONDS: i64 = 90;
+
+/// ε-greedy exploration floor (§3c) around the heuristic, bounded to ≤1
+/// explored reach per episode. When the inner timer holds on ADAPTIVE BACKOFF
+/// ONLY (never the MaxUnanswered pestering guard), and the episode's
+/// deterministic exploration instant is now, propose Reach instead. The
+/// presence governor still disposes — exploration only proposes within the
+/// envelope. This is what lets the future fit see reaches at times the rules
+/// would never pick.
+struct ExploringTimer {
+    inner: HeuristicTimer,
+}
+
+impl ExploringTimer {
+    /// The episode's single scheduled exploration instant: uniform in
+    /// [episode_start + threshold, episode_start + backoff_ceiling), derived
+    /// deterministically from the episode identity (stateless, reproducible
+    /// offline from the anchor row).
+    fn exploration_time(&self, f: &TimingFeatures) -> i64 {
+        let span = (OUTREACH_BACKOFF_AFTER_SECONDS - f.threshold).max(1) as u64;
+        let u = splitmix64(f.episode_start as u64) % span;
+        f.episode_start + f.threshold + u as i64
+    }
+
+    /// (decision, explored): explored=true only when the exploration fired.
+    fn decide_explored(&self, f: &TimingFeatures) -> (TimingDecision, bool) {
+        let base = self.inner.decide(f);
+        if let TimingDecision::Hold(HoldReason::AdaptiveBackoff) = base {
+            let t = self.exploration_time(f);
+            if f.now >= t && f.now < t + EXPLORE_WINDOW_SECONDS {
+                return (TimingDecision::Reach, true);
+            }
+        }
+        (base, false)
+    }
+}
+
+/// The blind-A/B harness (continuation doc §3a-1): two timing arms live at
+/// once; a deterministic per-EPISODE coin owns each silence end to end (no
+/// within-episode interleaving). Arm assignment + explored flag are logged on
+/// every anchor row so ratings join to arms offline. Today: arm A = the
+/// heuristic control, arm B = heuristic + the exploration floor — a real
+/// behavioral difference that exercises the whole pipeline before any learned
+/// timer exists. When V0 lands, it slots in as an arm behind the same seam.
+struct AbTimer {
+    control: HeuristicTimer,
+    explore: ExploringTimer,
+}
+
+impl AbTimer {
+    fn new() -> Self {
+        AbTimer {
+            control: HeuristicTimer,
+            explore: ExploringTimer { inner: HeuristicTimer },
+        }
+    }
+
+    /// (decision, arm, explored). Separate hash stream from exploration_time
+    /// (different constant) so arm and instant are independent.
+    fn decide_with_meta(&self, f: &TimingFeatures) -> (TimingDecision, &'static str, bool) {
+        let arm_b = (splitmix64((f.episode_start as u64) ^ 0xA5A5_5A5A_C3C3_3C3C) >> 32) & 1 == 1;
+        if arm_b {
+            let (d, explored) = self.explore.decide_explored(f);
+            (d, "b", explored)
+        } else {
+            (self.control.decide(f), "a", false)
+        }
     }
 }
 
@@ -353,11 +444,13 @@ async fn tick(
         last_decision_at,
         consecutive_drops,
         prior_count,
+        episode_start: presence.last_user_input,
     };
     // The timing model's OWN proposal — computed ALWAYS, so the corpus records
     // what the timer would have done even on ticks the governor blocks. The
-    // future learned timer trains on THIS, not on the governed result.
-    let timer_proposal = HeuristicTimer.decide(&features);
+    // future learned timer trains on THIS, not on the governed result. The
+    // AbTimer assigns this episode's arm and (arm B only) the exploration flag.
+    let (timer_proposal, ab_arm, explored) = AbTimer::new().decide_with_meta(&features);
     let timer_decision_str = match &timer_proposal {
         TimingDecision::Reach => "reach",
         TimingDecision::Hold(r) => r.as_str(),
@@ -396,10 +489,12 @@ async fn tick(
 
     // Log this ARMED tick (past the idle threshold) to the initiation-timing
     // corpus — the training spine of the learned timer. `decision` is the final
-    // governed outcome; `timer_decision` is the model's own proposal. The
+    // governed outcome; `timer_decision` is the model's own proposal; `ab_arm`
+    // + `explored` identify the blind-A/B arm and the exploration floor. The
     // censored "user spoke first" negatives are recovered offline by joining
-    // to the next user message.
-    let _ = persistence::insert_initiation_anchor(
+    // to the next user message. The returned anchor id gets the delivered
+    // reach message stamped onto it below, for exact ratings→arm joins.
+    let anchor_id = persistence::insert_initiation_anchor(
         db,
         conversation_id,
         elapsed,
@@ -414,8 +509,11 @@ async fn tick(
         day_of_week,
         decision_str,
         timer_decision_str,
+        ab_arm,
+        explored,
     )
-    .await;
+    .await
+    .ok();
 
     match decision {
         TimingDecision::Hold(reason) => {
@@ -455,9 +553,34 @@ async fn tick(
     let canvas = persistence::get_canvas(db, conversation_id).await?;
     let partition = memory_assembler::partition(&all_msgs, &active_epochs, &canvas);
     let sys = system_prompt.read().unwrap().clone();
+
+    // Ring-4 recall, keyed on the LAST EXCHANGE: if the conversation trailed
+    // off on something with deep-history resonance, the reach can be about
+    // that thing rather than just about elapsed time — the first
+    // content-conditioned brick (§5.4). Gated hard inside maybe_recall; on
+    // ordinary silences this is a no-op.
+    let recall_query: String = history
+        .iter()
+        .rev()
+        .take(2)
+        .map(|m| m.content.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let elig = crate::recall::RecallEligibility {
+        epoch_ranges: active_epochs
+            .iter()
+            .map(|e| (e.period_start_message_id, e.period_end_message_id))
+            .collect(),
+        trimmed_ids: memory_assembler::trimmed_recent_ids(&sys, &partition, Some(" "))
+            .into_iter()
+            .collect(),
+    };
+    let recalled = crate::recall::maybe_recall(db, conversation_id, &recall_query, &elig).await;
+
     let messages = memory_assembler::build_chat_messages(
         &sys,
         &partition,
+        recalled.as_deref(),
         Some(" "),
     );
 
@@ -593,6 +716,12 @@ async fn tick(
                 db, conversation_id, "assistant", &content, true,
             )
             .await?;
+
+            // Stamp the delivered reach onto its anchor row — the exact
+            // ratings→arm join (rating.message_id = anchor.reach_message_id).
+            if let Some(aid) = anchor_id {
+                let _ = persistence::set_anchor_reach_message(db, aid, msg.id).await;
+            }
 
             let _ = app.emit(
                 "dave:stream_end",

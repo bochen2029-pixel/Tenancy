@@ -82,6 +82,9 @@ interface DaveState {
   /// 0 = clear. Operate on Dave's most recent self-initiated reach.
   rateLastReach: (rating: number) => Promise<void>;
   markMissedReach: () => Promise<void>;
+  /// "This quiet is right" — the positive silence label (symmetric to
+  /// markMissedReach; without it curation only pushes toward more reaching).
+  blessSilence: () => Promise<void>;
   showFlash: (msg: string) => void;
 }
 
@@ -355,6 +358,17 @@ export const useDaveStore = create<DaveState>((set, get) => ({
       get().showFlash('here, he should have');
     } catch (e) {
       console.error('markMissedReach failed:', e);
+    }
+  },
+
+  blessSilence: async () => {
+    const cid = get().conversationId;
+    if (!cid) return;
+    try {
+      await ipc.blessSilence(cid);
+      get().showFlash('the quiet is right');
+    } catch (e) {
+      console.error('blessSilence failed:', e);
     }
   },
 

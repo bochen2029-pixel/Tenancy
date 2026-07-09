@@ -486,12 +486,28 @@ pub(crate) async fn run_chat_inference_and_emit(
         base_prompt
     };
 
+    // Ring-4 recall (REEL Op 4): if this turn reaches for something out of
+    // context — a remember-cue or a rare term — pull the verbatim Tape
+    // segments back in. Gated hard inside maybe_recall (most turns: no-op,
+    // prefix cache stays warm).
+    let elig = crate::recall::RecallEligibility {
+        epoch_ranges: active_epochs
+            .iter()
+            .map(|e| (e.period_start_message_id, e.period_end_message_id))
+            .collect(),
+        trimmed_ids: memory_assembler::trimmed_recent_ids(&system_content, &partition, None)
+            .into_iter()
+            .collect(),
+    };
+    let recalled = crate::recall::maybe_recall(db, conversation_id, user_text, &elig).await;
+
     // user_text is already in partition.recent (persisted earlier in
     // send_to_dave or by the original send for the deferred fire). Pass None
     // to build_chat_messages so it doesn't append a duplicate user turn.
     let messages = memory_assembler::build_chat_messages(
         &system_content,
         &partition,
+        recalled.as_deref(),
         None,
     );
 
@@ -1443,6 +1459,19 @@ pub async fn mark_missed_reach(
     conversation_id: i64,
 ) -> Result<(), String> {
     persistence::mark_missed_reach(&state.db, conversation_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Record "this quiet is right" at the current end of the conversation — the
+/// positive silence label (the symmetric down-channel; without it, curation
+/// only ever teaches the future timer to reach more).
+#[tauri::command]
+pub async fn bless_silence(
+    state: State<'_, AppState>,
+    conversation_id: i64,
+) -> Result<(), String> {
+    persistence::mark_silence(&state.db, conversation_id, "good_silence")
         .await
         .map_err(|e| e.to_string())
 }

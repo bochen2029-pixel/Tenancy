@@ -15,6 +15,7 @@ mod outreach;
 mod persistence;
 mod presence;
 mod prompts;
+mod recall;
 mod sidecar;
 mod think_strip;
 mod time_awareness;
@@ -137,6 +138,7 @@ fn main() {
             commands::reset_system_prompt,
             commands::rate_last_reach,
             commands::mark_missed_reach,
+            commands::bless_silence,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
