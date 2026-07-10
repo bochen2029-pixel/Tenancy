@@ -53,3 +53,4 @@ framework_v5/framework.chunks/
 # Session scratch
 _qc_*
 _font_test.woff2
+__pycache__/
