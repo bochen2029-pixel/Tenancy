@@ -319,6 +319,22 @@ fn init_schema(conn: &Connection) -> Result<()> {
             hit_count INTEGER NOT NULL,
             injected_tokens INTEGER NOT NULL
         );
+        -- Arm C (IntentionTimer): Dave's own stated return-times, asked once
+        -- per exchange end. fire_at NULL = he said nothing (half the signal).
+        -- Consumed when acted on; cancelled when the user speaks first;
+        -- expired when the fire window passes unacted.
+        CREATE TABLE IF NOT EXISTS reach_intentions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            source_message_id INTEGER,
+            episode_start INTEGER NOT NULL,
+            raw_reply TEXT NOT NULL,
+            fire_at INTEGER,
+            consumed_at INTEGER,
+            cancelled_at INTEGER,
+            expired_at INTEGER
+        );
         "#,
     )?;
 
@@ -350,6 +366,11 @@ fn init_schema(conn: &Connection) -> Result<()> {
     );
     let _ = conn.execute(
         "ALTER TABLE initiation_anchors ADD COLUMN reach_message_id INTEGER",
+        [],
+    );
+    // Arm C: whether this anchor's reach proposal came from a stated intention.
+    let _ = conn.execute(
+        "ALTER TABLE initiation_anchors ADD COLUMN via_intention INTEGER NOT NULL DEFAULT 0",
         [],
     );
     // Migration: counterfactuals gain a kind — 'missed_reach' (should have
@@ -1120,6 +1141,7 @@ pub async fn insert_initiation_anchor(
     timer_decision: &str,
     ab_arm: &str,
     explored: bool,
+    via_intention: bool,
 ) -> Result<i64> {
     let db = db.clone();
     let presence_state = presence_state.to_string();
@@ -1135,13 +1157,13 @@ pub async fn insert_initiation_anchor(
              (ts, conversation_id, seconds_since_user_input, presence_state, focused,
               os_idle_ms, history_shape, unanswered_reaches, consecutive_drops,
               threshold_seconds, time_of_day_min, day_of_week, decision, timer_decision,
-              ab_arm, explored)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+              ab_arm, explored, via_intention)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
             params![
                 now, conversation_id, seconds_since_user_input, presence_state, focused as i64,
                 os_idle_ms, history_shape, unanswered_reaches, consecutive_drops,
                 threshold_seconds, time_of_day_min, day_of_week, decision, timer_decision,
-                ab_arm, explored as i64
+                ab_arm, explored as i64, via_intention as i64
             ],
         )?;
         Ok(conn.last_insert_rowid())
@@ -1288,6 +1310,129 @@ pub async fn insert_recall_fire(
             "INSERT INTO recall_fires (ts, conversation_id, query_terms, hit_count, injected_tokens)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![now, conversation_id, query_terms, hit_count, injected_tokens],
+        )?;
+        Ok(())
+    })
+    .await?
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Arm C: reach_intentions. Dave's stated return-times (intention.rs).
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Insert an intention row, GUARDED against the ask-completion race: the ask
+/// runs for seconds after the exchange ends, and a user message landing in
+/// that gap makes the intention stale (cancel-on-message can't cover an
+/// insert that arrives after the cancel). The insert only lands if
+/// presence.last_user_input is still the value captured at exchange end.
+/// Returns true if inserted.
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_intention_guarded(
+    db: &DbHandle,
+    conversation_id: i64,
+    source_message_id: Option<i64>,
+    episode_start: i64,
+    raw_reply: &str,
+    fire_at: Option<i64>,
+    guard_last_user_input: i64,
+) -> Result<bool> {
+    let db = db.clone();
+    let raw_reply = raw_reply.to_string();
+    tokio::task::spawn_blocking(move || -> Result<bool> {
+        let conn = db.lock().unwrap();
+        let current: i64 = conn.query_row(
+            "SELECT last_user_input FROM presence WHERE id = 1",
+            [],
+            |r| r.get(0),
+        )?;
+        if current != guard_last_user_input {
+            return Ok(false); // stale: the user spoke while the ask ran
+        }
+        let now = Utc::now().timestamp();
+        conn.execute(
+            "INSERT INTO reach_intentions
+             (conversation_id, created_at, source_message_id, episode_start, raw_reply, fire_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![conversation_id, now, source_message_id, episode_start, raw_reply, fire_at],
+        )?;
+        Ok(true)
+    })
+    .await?
+}
+
+/// A user message makes open intentions moot (the exchange resumed).
+pub async fn cancel_open_intentions(db: &DbHandle, conversation_id: i64) -> Result<()> {
+    let db = db.clone();
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        let conn = db.lock().unwrap();
+        let now = Utc::now().timestamp();
+        conn.execute(
+            "UPDATE reach_intentions SET cancelled_at = ?1
+             WHERE conversation_id = ?2 AND fire_at IS NOT NULL
+               AND consumed_at IS NULL AND cancelled_at IS NULL AND expired_at IS NULL",
+            params![now, conversation_id],
+        )?;
+        Ok(())
+    })
+    .await?
+}
+
+/// The single due intention for this conversation, if any: fire_at ≤ now,
+/// still inside the fire window, not consumed/cancelled/expired.
+pub async fn due_intention(
+    db: &DbHandle,
+    conversation_id: i64,
+    now: i64,
+    window_seconds: i64,
+) -> Result<Option<i64>> {
+    let db = db.clone();
+    tokio::task::spawn_blocking(move || -> Result<Option<i64>> {
+        let conn = db.lock().unwrap();
+        let row = conn
+            .query_row(
+                "SELECT id FROM reach_intentions
+                 WHERE conversation_id = ?1 AND fire_at IS NOT NULL
+                   AND fire_at <= ?2 AND fire_at + ?3 > ?2
+                   AND consumed_at IS NULL AND cancelled_at IS NULL AND expired_at IS NULL
+                 ORDER BY fire_at ASC LIMIT 1",
+                params![conversation_id, now, window_seconds],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(row)
+    })
+    .await?
+}
+
+/// Expire every open intention whose fire window has passed — regardless of
+/// which tick pre-gate (idle threshold, 1h band, conversation gate) kept it
+/// from ever being consulted. Run at tick start so band-straddlers get an
+/// honest expired_at instead of dangling open forever.
+pub async fn expire_stale_intentions(db: &DbHandle, now: i64, window_seconds: i64) -> Result<()> {
+    let db = db.clone();
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        let conn = db.lock().unwrap();
+        conn.execute(
+            "UPDATE reach_intentions SET expired_at = ?1
+             WHERE fire_at IS NOT NULL AND fire_at + ?2 <= ?1
+               AND consumed_at IS NULL AND cancelled_at IS NULL AND expired_at IS NULL",
+            params![now, window_seconds],
+        )?;
+        Ok(())
+    })
+    .await?
+}
+
+/// One-shot consumption: the intention was acted on (reach attempted —
+/// delivered or discriminator-dropped, either way it had its shot).
+pub async fn consume_intention(db: &DbHandle, id: i64) -> Result<()> {
+    let db = db.clone();
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        let conn = db.lock().unwrap();
+        let now = Utc::now().timestamp();
+        conn.execute(
+            "UPDATE reach_intentions SET consumed_at = ?1 WHERE id = ?2",
+            params![now, id],
         )?;
         Ok(())
     })
@@ -1898,7 +2043,7 @@ mod tests {
         let cid = create_conversation(&db).await.unwrap();
         let aid = insert_initiation_anchor(
             &db, cid, 240, "present_elsewhere", false, Some(1000), "user_statement",
-            0, 0, 180, 600, 2, "reach", "reach", "b", true,
+            0, 0, 180, 600, 2, "reach", "reach", "b", true, false,
         )
         .await
         .unwrap();
@@ -1940,6 +2085,62 @@ mod tests {
             .unwrap();
         assert_eq!(missed, 1);
         assert_eq!(blessed, 1);
+    }
+
+    #[tokio::test]
+    async fn intention_lifecycle_guard_cancel_due_consume_expire() {
+        let db = mem_db();
+        let cid = create_conversation(&db).await.unwrap();
+        let lui: i64 = {
+            let conn = db.lock().unwrap();
+            conn.query_row("SELECT last_user_input FROM presence WHERE id=1", [], |r| r.get(0))
+                .unwrap()
+        };
+        let now = Utc::now().timestamp();
+
+        // Guarded insert with the CURRENT last_user_input lands.
+        assert!(insert_intention_guarded(&db, cid, None, lui, "8:40 pm", Some(now + 300), lui)
+            .await.unwrap());
+        // With a stale guard it is discarded (user spoke mid-ask).
+        assert!(!insert_intention_guarded(&db, cid, None, lui, "9:00 pm", Some(now + 600), lui - 1)
+            .await.unwrap());
+
+        // Not yet due.
+        assert!(due_intention(&db, cid, now, 1800).await.unwrap().is_none());
+        // Due inside the window.
+        let id = due_intention(&db, cid, now + 400, 1800).await.unwrap().unwrap();
+        // Consume is one-shot.
+        consume_intention(&db, id).await.unwrap();
+        assert!(due_intention(&db, cid, now + 500, 1800).await.unwrap().is_none());
+
+        // A second intention gets cancelled by a user message.
+        assert!(insert_intention_guarded(&db, cid, None, lui, "10:00 pm", Some(now + 900), lui)
+            .await.unwrap());
+        cancel_open_intentions(&db, cid).await.unwrap();
+        assert!(due_intention(&db, cid, now + 1000, 1800).await.unwrap().is_none());
+
+        // A third expires once the window passes — even though no consult ran.
+        assert!(insert_intention_guarded(&db, cid, None, lui, "11:00 pm", Some(now + 1200), lui)
+            .await.unwrap());
+        expire_stale_intentions(&db, now + 1200 + 1800, 1800).await.unwrap();
+        assert!(due_intention(&db, cid, now + 1200 + 1801, 1800).await.unwrap().is_none());
+        let conn = db.lock().unwrap();
+        let expired: i64 = conn
+            .query_row("SELECT COUNT(*) FROM reach_intentions WHERE expired_at IS NOT NULL", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(expired, 1);
+        // "nothing" rows (fire_at NULL) are never cancelled/expired — pure corpus.
+        drop(conn);
+        assert!(insert_intention_guarded(&db, cid, None, lui, "nothing", None, lui).await.unwrap());
+        cancel_open_intentions(&db, cid).await.unwrap();
+        let conn = db.lock().unwrap();
+        let untouched: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM reach_intentions WHERE fire_at IS NULL AND cancelled_at IS NULL",
+                [], |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(untouched, 1);
     }
 
     #[test]

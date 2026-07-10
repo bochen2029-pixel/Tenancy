@@ -9,6 +9,41 @@ To roll back a change: `cp -r .snapshots/<timestamp>_<label>/* ./` then
 
 ---
 
+## 2026-07-10 — Arm C: IntentionTimer — Dave states when he'll come back
+
+Operator-proposed, A8-reviewed (design + outcome:
+`docs/INTENTION_TIMER_armC_design.md`). After each exchange ends, ONE
+invisible pass (riding the just-used warm prompt cache — the exact message
+vector is reused, never re-assembled) asks Dave-in-character whether anything
+would pull him back later, and when. A parsed clock time becomes a
+`reach_intentions` row; a user message cancels it (moot); at the stated time,
+if this episode's blind-A/B arm is C, the outreach tick proposes a reach —
+**through the presence governor, the discriminator, and the single render
+path, unchanged**. A2 extended from *whether* to *when*.
+
+Hard-won by the pre-trust smoke (`tools/intention_ask_smoke.py`, A8 R5 —
+vindicated three times): (1) without `enable_thinking:false` the 9B burns the
+whole budget inside a think block and the channel reads dead; (2) **any
+example time in the ask gets parroted back 83–100%** — a "stated intention"
+that's just the example is a cron with extra steps, so the shipped ask is
+example-free; (3) the yes-rate is volatile (0%→75% across runs of identical
+wording) — the smoke gates format only; the live rate belongs to the new
+`reach_intentions` telemetry in corpus_inspect.py.
+
+Guards from the A8 review: staleness-guarded insert (user-spoke-mid-ask race);
+MaxUnanswered pestering cap is NEVER bypassed (backoff is — that's the point);
+intentions expire honestly even when tick pre-gates keep them from being
+consulted; ≤1 consumption per intention (delivered or dropped, it had its
+shot). Split kill switches: `intention_ask_enabled` / `intention_act_enabled`.
+AbTimer is now 3-way (a control / b exploration / c intention-else-control);
+anchors gain `via_intention`.
+
+cargo test **114/114** (+9: intention lifecycle incl. guard/cancel/expire,
+parser suite, 3-way arm determinism, cap-respect). New: `intention.rs`;
+schema: `reach_intentions` + `initiation_anchors.via_intention`.
+
+---
+
 ## 2026-07-09 — Ring 4 recall (perpetual memory, slice 1) + outreach A/B instrumentation
 
 Two linked slices toward the PIY wow factor, designed against the REEL protocol

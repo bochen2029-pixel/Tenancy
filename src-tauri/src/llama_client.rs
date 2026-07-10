@@ -54,6 +54,7 @@ struct CompletionMessage {
     content: String,
 }
 
+#[derive(Clone)]
 pub struct LlamaClient {
     base_url: String,
     http: reqwest::Client,

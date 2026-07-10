@@ -181,6 +181,11 @@ pub async fn send_to_dave(
             .map_err(|e| e.to_string())?;
     let _ = app.emit("dave:user_persisted", &user_msg);
 
+    // A user message makes any open reach-intention moot — the exchange
+    // resumed, and the context that formed the intention is stale. (The
+    // ask-completion race is covered separately by the guarded insert.)
+    let _ = persistence::cancel_open_intentions(&state.db, conversation_id).await;
+
     // ============================================================
     // Delivery + read indicators (Telegram-style two checkmarks)
     // ============================================================
@@ -511,6 +516,11 @@ pub(crate) async fn run_chat_inference_and_emit(
         None,
     );
 
+    // Keep the EXACT vector for the exchange-end intention ask (A8 R4: the
+    // ask must ride this request's warm prompt cache — never re-assemble from
+    // DB, never re-run recall). Cheap clone (strings, ~hundreds of KB).
+    let messages_for_ask = messages.clone();
+
     // Run inference WITHOUT per-token emit. Collect into the full result.
     // The backend takes full ownership of pacing — frontend just renders.
     let inference_start = std::time::Instant::now();
@@ -624,6 +634,23 @@ pub(crate) async fn run_chat_inference_and_emit(
             "messageId": assistant_msg.id,
         }),
     );
+
+    // Exchange over — the arm-C intention ask (one short pass on the warm
+    // cache, invisible; gated inside spawn_ask). The guard value is
+    // presence.last_user_input AT THIS MOMENT: if another user message lands
+    // while the ask runs, the guarded insert discards the stale intention.
+    if let Ok(presence) = persistence::get_presence(db).await {
+        crate::intention::spawn_ask(
+            db.clone(),
+            client.clone(),
+            chat_in_flight.clone(),
+            messages_for_ask,
+            full.clone(),
+            conversation_id,
+            assistant_msg.id,
+            presence.last_user_input,
+        );
+    }
 
     Ok(())
 }

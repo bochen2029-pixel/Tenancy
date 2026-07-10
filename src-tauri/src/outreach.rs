@@ -285,13 +285,19 @@ impl ExploringTimer {
     }
 }
 
-/// The blind-A/B harness (continuation doc §3a-1): two timing arms live at
-/// once; a deterministic per-EPISODE coin owns each silence end to end (no
-/// within-episode interleaving). Arm assignment + explored flag are logged on
-/// every anchor row so ratings join to arms offline. Today: arm A = the
-/// heuristic control, arm B = heuristic + the exploration floor — a real
-/// behavioral difference that exercises the whole pipeline before any learned
-/// timer exists. When V0 lands, it slots in as an arm behind the same seam.
+/// How long a due intention stays actionable past its stated time. Within the
+/// window the proposal retries every tick (the governor may be holding — Dave
+/// "waits for the right moment"); past it the intention expires.
+const INTENTION_FIRE_WINDOW_SECONDS: i64 = 30 * 60;
+
+/// The blind A/B/C harness (continuation doc §3a-1 + the arm-C addendum): the
+/// timing arms live at once; a deterministic per-EPISODE coin owns each
+/// silence end to end (no within-episode interleaving). Arm assignment +
+/// explored/via_intention flags are logged on every anchor row so ratings
+/// join to arms offline. Arm A = heuristic control; arm B = heuristic + the
+/// exploration floor; arm C = Dave's own stated intention when one is due,
+/// else the heuristic. When V0 lands, it slots in as an arm behind the same
+/// seam.
 struct AbTimer {
     control: HeuristicTimer,
     explore: ExploringTimer,
@@ -305,15 +311,48 @@ impl AbTimer {
         }
     }
 
-    /// (decision, arm, explored). Separate hash stream from exploration_time
+    /// The episode's arm. Separate hash stream from exploration_time
     /// (different constant) so arm and instant are independent.
-    fn decide_with_meta(&self, f: &TimingFeatures) -> (TimingDecision, &'static str, bool) {
-        let arm_b = (splitmix64((f.episode_start as u64) ^ 0xA5A5_5A5A_C3C3_3C3C) >> 32) & 1 == 1;
-        if arm_b {
-            let (d, explored) = self.explore.decide_explored(f);
-            (d, "b", explored)
-        } else {
-            (self.control.decide(f), "a", false)
+    fn arm_for(episode_start: i64) -> &'static str {
+        match splitmix64((episode_start as u64) ^ 0xA5A5_5A5A_C3C3_3C3C) % 3 {
+            0 => "a",
+            1 => "b",
+            _ => "c",
+        }
+    }
+
+    /// (decision, arm, explored, via_intention). `due_intention` is only ever
+    /// Some when this episode's arm is C and an unconsumed intention is inside
+    /// its fire window (the caller fetches it arm-gated).
+    ///
+    /// An intention deliberately bypasses ADAPTIVE BACKOFF (that's the point —
+    /// Dave said when) but NEVER the MaxUnanswered pestering cap (A8 R2): the
+    /// one hard anti-pestering limit has no exceptions.
+    fn decide_with_meta(
+        &self,
+        f: &TimingFeatures,
+        due_intention: Option<i64>,
+    ) -> (TimingDecision, &'static str, bool, bool) {
+        match Self::arm_for(f.episode_start) {
+            "a" => (self.control.decide(f), "a", false, false),
+            "b" => {
+                let (d, explored) = self.explore.decide_explored(f);
+                (d, "b", explored, false)
+            }
+            _ => {
+                if due_intention.is_some() {
+                    if f.prior_count >= OUTREACH_MAX_UNANSWERED_REACHES {
+                        return (
+                            TimingDecision::Hold(HoldReason::MaxUnanswered),
+                            "c",
+                            false,
+                            false,
+                        );
+                    }
+                    return (TimingDecision::Reach, "c", false, true);
+                }
+                (self.control.decide(f), "c", false, false)
+            }
         }
     }
 }
@@ -374,6 +413,11 @@ async fn tick(
     let presence = persistence::get_presence(db).await?;
     let now = Utc::now().timestamp();
     let elapsed = now - presence.last_user_input;
+
+    // Expire past-window intentions BEFORE any pre-gate can return early, so
+    // rows that die behind the idle threshold / 1h band / conversation gate
+    // still get an honest expired_at instead of dangling open (A8 R3).
+    let _ = persistence::expire_stale_intentions(db, now, INTENTION_FIRE_WINDOW_SECONDS).await;
 
     // Read live threshold from settings each tick. Cheap (single SQLite row).
     let threshold = current_threshold_seconds(db);
@@ -449,8 +493,20 @@ async fn tick(
     // The timing model's OWN proposal — computed ALWAYS, so the corpus records
     // what the timer would have done even on ticks the governor blocks. The
     // future learned timer trains on THIS, not on the governed result. The
-    // AbTimer assigns this episode's arm and (arm B only) the exploration flag.
-    let (timer_proposal, ab_arm, explored) = AbTimer::new().decide_with_meta(&features);
+    // AbTimer assigns this episode's arm; arm C consults Dave's stated
+    // intention (fetched arm-gated, and only when acting is enabled).
+    let due_intention_id = if AbTimer::arm_for(features.episode_start) == "c"
+        && crate::intention::act_enabled(db)
+    {
+        persistence::due_intention(db, conversation_id, now, INTENTION_FIRE_WINDOW_SECONDS)
+            .await
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
+    let (timer_proposal, ab_arm, explored, via_intention) =
+        AbTimer::new().decide_with_meta(&features, due_intention_id);
     let timer_decision_str = match &timer_proposal {
         TimingDecision::Reach => "reach",
         TimingDecision::Hold(r) => r.as_str(),
@@ -511,6 +567,7 @@ async fn tick(
         timer_decision_str,
         ab_arm,
         explored,
+        via_intention,
     )
     .await
     .ok();
@@ -524,6 +581,18 @@ async fn tick(
             return Ok(TickOutcome::Skip);
         }
         TimingDecision::Reach => {}
+    }
+
+    // The governed decision is Reach — if it rode an intention, consume it
+    // NOW (one shot: the reach is being attempted; delivered or
+    // discriminator-dropped, it had its moment). Governor holds above never
+    // reach this line, so a blocked intention keeps retrying inside its
+    // window ("waiting for the right moment").
+    if via_intention {
+        if let Some(iid) = due_intention_id {
+            let _ = persistence::consume_intention(db, iid).await;
+            tracing::info!("outreach: firing from Dave's stated intention (id={})", iid);
+        }
     }
 
     // All gates passed — log loud so the loop's liveness is visible in dev.log
@@ -1131,5 +1200,48 @@ mod tests {
         assert!(chunks.len() >= 2);
         let joined: String = chunks.join("");
         assert_eq!(joined, "hello world. yes.");
+    }
+
+    #[test]
+    fn arm_assignment_deterministic_and_three_way() {
+        // Same episode → same arm, and all three arms occur across episodes.
+        let mut seen = std::collections::HashSet::new();
+        for ep in 0..200i64 {
+            let a = AbTimer::arm_for(ep * 7919 + 3);
+            assert_eq!(a, AbTimer::arm_for(ep * 7919 + 3));
+            seen.insert(a);
+        }
+        assert_eq!(seen.len(), 3);
+    }
+
+    #[test]
+    fn intention_fires_in_arm_c_but_never_past_unanswered_cap() {
+        // Find an arm-C episode.
+        let ep = (0..).find(|e| AbTimer::arm_for(*e) == "c").unwrap();
+        let t = AbTimer::new();
+        let mut f = TimingFeatures {
+            now: ep + 300,
+            elapsed: 300,
+            threshold: 180,
+            last_decision_at: ep + 240, // inside backoff → heuristic would hold
+            consecutive_drops: 2,
+            prior_count: 0,
+            episode_start: ep,
+        };
+        // Due intention → Reach via intention, bypassing adaptive backoff.
+        let (d, arm, _, via) = t.decide_with_meta(&f, Some(42));
+        assert_eq!(arm, "c");
+        assert!(via);
+        assert!(matches!(d, TimingDecision::Reach));
+        // At the pestering cap the intention must NOT fire (A8 R2).
+        f.prior_count = OUTREACH_MAX_UNANSWERED_REACHES;
+        let (d, _, _, via) = t.decide_with_meta(&f, Some(42));
+        assert!(!via);
+        assert!(matches!(d, TimingDecision::Hold(HoldReason::MaxUnanswered)));
+        // No due intention → arm C behaves as the heuristic control.
+        f.prior_count = 0;
+        let (d, _, _, via) = t.decide_with_meta(&f, None);
+        assert!(!via);
+        assert!(matches!(d, TimingDecision::Hold(HoldReason::AdaptiveBackoff)));
     }
 }

@@ -8,6 +8,7 @@ mod discriminator;
 mod harness;
 mod headless;
 mod idle_worker;
+mod intention;
 mod leak;
 mod llama_client;
 mod memory_assembler;

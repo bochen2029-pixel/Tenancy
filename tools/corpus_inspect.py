@@ -376,6 +376,47 @@ def report_rhythm_and_recall(conn):
             print(f"    [{terms}] → {hits}")
 
 
+def report_intentions(conn):
+    # Arm C ask-channel telemetry (A8 R6): parse-fail→"nothing" is invisible
+    # by design, so this is the instrument that distinguishes "Dave rarely
+    # forms intentions" from "the ask channel is dead."
+    print(hr("reach_intentions — Dave's stated return-times (arm C ask channel)"))
+    n = count(conn, "reach_intentions")
+    if n is None:
+        print("  <table missing — DB predates arm C>")
+        return
+    if n == 0:
+        print("  0 asks recorded. Fills once exchanges end with the upgraded app.")
+        return
+    timed = conn.execute(
+        "SELECT COUNT(*) FROM reach_intentions WHERE fire_at IS NOT NULL").fetchone()[0]
+    print(f"  {n} asks: {timed} named a time ({100*timed/n:.0f}%), {n-timed} said nothing")
+    for col, label in [("consumed_at", "consumed (fired a reach)"),
+                       ("cancelled_at", "cancelled (user spoke first)"),
+                       ("expired_at", "expired (window passed unacted)")]:
+        c = conn.execute(
+            f"SELECT COUNT(*) FROM reach_intentions WHERE {col} IS NOT NULL").fetchone()[0]
+        print(f"    {label:32} {c}")
+    if timed:
+        # Stated-delay + round-number tripwire: an LLM parroting round times
+        # shows up as minute-marks piling on :00/:15/:30/:45.
+        rows = conn.execute(
+            "SELECT created_at, fire_at FROM reach_intentions WHERE fire_at IS NOT NULL").fetchall()
+        delays = sorted((f - c) // 60 for c, f in rows if f > c)
+        if delays:
+            print(f"  stated delay (min): min={delays[0]} median={delays[len(delays)//2]} max={delays[-1]}")
+        import sqlite3 as _s  # noqa
+        round_marks = conn.execute(
+            "SELECT COUNT(*) FROM reach_intentions WHERE fire_at IS NOT NULL "
+            "AND CAST(strftime('%M', fire_at, 'unixepoch') AS INTEGER) % 15 = 0").fetchone()[0]
+        print(f"  quarter-hour marks: {round_marks}/{timed} "
+              f"({'suspiciously round' if timed >= 8 and round_marks/timed > 0.7 else 'ok at this N'})")
+        print("  last 5 raw replies:")
+        for (raw,) in conn.execute(
+            "SELECT raw_reply FROM reach_intentions ORDER BY id DESC LIMIT 5"):
+            print(f"    {raw[:70]!r}")
+
+
 def report_messages(conn):
     print(hr("messages — the conversation backdrop"))
     n = count(conn, "messages")
@@ -444,6 +485,7 @@ def inspect(db_path, dump_episodes=False):
         report_messages(conn)
         report_table_breakdowns(conn)
         report_rhythm_and_recall(conn)
+        report_intentions(conn)
         recon = report_reconstruction(conn, dump_episodes)
         if dump_episodes:
             print(hr("per-episode rows"))
